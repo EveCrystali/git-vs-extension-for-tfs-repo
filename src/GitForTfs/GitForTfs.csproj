@@ -52,6 +52,8 @@
     <!-- System.Design holds MenuCommandService, the base class of OleMenuCommandService
          whose AddCommand method the command classes call. -->
     <Reference Include="System.Design" />
+    <!-- MEF: the in-proc editor blame adornment is exported/imported via System.ComponentModel.Composition. -->
+    <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="Microsoft.CSharp" />
@@ -70,8 +72,10 @@
     <Compile Include="Services\GitResult.cs" />
     <Compile Include="Services\GitModels.cs" />
     <Compile Include="Services\GitCliService.cs" />
+    <Compile Include="Services\GitLineBlame.cs" />
     <Compile Include="Services\SettingsStore.cs" />
     <Compile Include="Services\OutputLogger.cs" />
+    <Compile Include="Editor\GitBlameCurrentLineAdornment.cs" />
     <Compile Include="Mvvm\ViewModelBase.cs" />
     <Compile Include="Mvvm\RelayCommand.cs" />
     <Compile Include="Mvvm\AsyncRelayCommand.cs" />

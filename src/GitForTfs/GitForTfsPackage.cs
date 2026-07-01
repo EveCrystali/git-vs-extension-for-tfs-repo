@@ -4,6 +4,7 @@ using System.Threading;
 using GitForTfs.Commands;
 using GitForTfs.ToolWindows;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Task = System.Threading.Tasks.Task;
 
 namespace GitForTfs
@@ -29,11 +30,47 @@ namespace GitForTfs
     [Guid(PackageGuids.PackageString)]
     public sealed class GitForTfsPackage : AsyncPackage
     {
+        /// <summary>Set once the package has loaded; used by in-proc editor components (the
+        /// blame adornment) that need to reach the tool window without a package reference.</summary>
+        internal static GitForTfsPackage Instance { get; private set; }
+
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             await base.InitializeAsync(cancellationToken, progress);
+            Instance = this;
             await OpenGitToolWindowCommand.InitializeAsync(this);
             await ShowFileHistoryCommand.InitializeAsync(this);
+        }
+
+        /// <summary>
+        /// Opens the "Git for TFS" tool window on the File History tab for the given file.
+        /// Called from the current-line blame adornment when the annotation is clicked;
+        /// force-loads the package if it is not yet initialized.
+        /// </summary>
+        internal static void ShowFileHistory(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+                return;
+
+            ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var package = Instance;
+                if (package == null && Package.GetGlobalService(typeof(SVsShell)) is IVsShell shell)
+                {
+                    var guid = new Guid(PackageGuids.PackageString);
+                    shell.LoadPackage(ref guid, out _);
+                    package = Instance;
+                }
+
+                if (package == null)
+                    return;
+
+                var pane = await package.ShowToolWindowAsync(
+                    typeof(GitToolWindow), 0, create: true, package.DisposalToken);
+                (pane?.Content as GitToolWindowControl)?.ShowFileHistoryForPath(filePath);
+            }).FileAndForget("gitfortfs/adornment-filehistory");
         }
     }
 }
