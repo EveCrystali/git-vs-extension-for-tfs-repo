@@ -1,0 +1,25 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+
+# VS temp / cache
+.vs/
+*.vsix
+*.VisualState.xml
+
+# NuGet
+packages/
+*.nuget.props
+*.nuget.targets
+
+# ReSharper / Rider
+_ReSharper*/
+*.DotSettings.user
+
+# OS
+Thumbs.db
+.DS_Store
