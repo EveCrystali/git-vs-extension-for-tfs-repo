@@ -113,7 +113,12 @@
          output assembly from this package. -->
     <ProjectReference Include="..\GitForTfs.CodeLens\GitForTfs.CodeLens.csproj">
       <Name>GitForTfs.CodeLens</Name>
+      <!-- Don't reference the assembly at compile time (it runs out-of-proc in the CodeLens
+           host), but DO pull its build output into the VSIX so the MefComponent asset
+           declared in the manifest actually ships. Without IncludeOutputGroupsInVSIX the
+           manifest points at a file that isn't in the container and the install fails. -->
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <IncludeOutputGroupsInVSIX>BuiltProjectOutputGroup;GetCopyToOutputDirectoryItems;SatelliteDllsProjectOutputGroup</IncludeOutputGroupsInVSIX>
     </ProjectReference>
   </ItemGroup>
 
@@ -128,4 +133,8 @@
   </ItemGroup>
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- Pulls in the VSSDK targets (CreateVsixContainer, GeneratePkgDef, VSCTCompile...).
+       Without this import the project builds only the DLL and never produces the .vsix.
+       $(VSToolsPath) is set by Microsoft.VSSDK.BuildTools.props (NuGet). -->
+  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
 </Project>
