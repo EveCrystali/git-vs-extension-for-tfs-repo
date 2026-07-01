@@ -58,7 +58,13 @@ namespace GitForTfs.CodeLens
 
         public async Task<CodeLensDataPointDescriptor> GetDataAsync(CodeLensDescriptorContext descriptorContext, CancellationToken token)
         {
-            var (startLine, endLine) = ResolveLineRange(descriptorContext);
+            // The applicable span (character offsets in the current buffer) is the reliable
+            // source of the element's location across SDK versions.
+            Span? span = descriptorContext?.ApplicableSpan;
+            if (span == null)
+                return null;
+
+            var (startLine, endLine) = GitBlameReader.MapSpanToLines(Descriptor.FilePath, span.Value.Start, span.Value.End);
 
             var blame = await GitBlameReader
                 .GetLastChangeAsync(Descriptor.FilePath, startLine, endLine, token)
@@ -79,12 +85,6 @@ namespace GitForTfs.CodeLens
         {
             // No expandable details view; the inline text and tooltip carry the information.
             return Task.FromResult<CodeLensDetailsDescriptor>(null);
-        }
-
-        private (int start, int end) ResolveLineRange(CodeLensDescriptorContext descriptorContext)
-        {
-            Span span = descriptorContext?.ApplicableSpan ?? Descriptor.ApplicableToSpan;
-            return GitBlameReader.MapSpanToLines(Descriptor.FilePath, span.Start, span.End);
         }
     }
 }
