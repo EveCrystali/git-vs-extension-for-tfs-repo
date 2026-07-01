@@ -4,25 +4,30 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vsshell="clr-namespace:Microsoft.VisualStudio.Shell;assembly=Microsoft.VisualStudio.Shell.15.0"
+             xmlns:imaging="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.Imaging"
+             xmlns:catalog="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.ImageCatalog"
              xmlns:conv="clr-namespace:GitForTfs.Mvvm"
              mc:Ignorable="d"
-             d:DesignHeight="600" d:DesignWidth="360"
+             d:DesignHeight="600" d:DesignWidth="340"
              Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}"
              Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"
+             FontFamily="{DynamicResource {x:Static vsshell:VsFonts.EnvironmentFontFamilyKey}}"
+             FontSize="{DynamicResource {x:Static vsshell:VsFonts.EnvironmentFontSizeKey}}"
+             TextOptions.TextFormattingMode="Display"
              Name="Root">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <conv:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis" />
+        <conv:EmptyStringToVisibilityConverter x:Key="EmptyToVis" />
+        <conv:GitStatusToBrushConverter x:Key="StatusToBrush" />
+        <conv:BoolToFontWeightConverter x:Key="BoolToWeight" />
 
         <!-- ============================================================
-             Theming. Everything below binds to Visual Studio environment
-             colors (VsBrushes) via DynamicResource so the tool window
-             tracks the active theme (dark/light/blue) instead of showing
-             the default white WPF chrome. DynamicResource never throws if a
-             key is missing, so this is safe across VS versions.
+             Everything binds to Visual Studio environment colors/fonts so
+             the window is indistinguishable from a built-in tool window in
+             any theme. DynamicResource never throws if a key is missing.
              ============================================================ -->
 
-        <!-- Text inputs: editor-dark background, themed text/caret/border. -->
         <Style TargetType="{x:Type TextBox}">
             <Setter Property="Background" Value="{DynamicResource {x:Static vsshell:VsBrushes.WindowKey}}" />
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.WindowTextKey}}" />
@@ -32,20 +37,18 @@
             <Setter Property="Padding" Value="3,2" />
         </Style>
 
-        <!-- List surfaces. -->
         <Style TargetType="{x:Type ListBox}">
-            <Setter Property="Background" Value="{DynamicResource {x:Static vsshell:VsBrushes.WindowKey}}" />
-            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.WindowTextKey}}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static vsshell:VsBrushes.ComboBoxBorderKey}}" />
-            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
         </Style>
 
-        <!-- List rows with themed hover / selection (default WPF uses a
-             hard-coded light-blue highlight that clashes with dark mode). -->
+        <!-- List rows: themed hover / selection matching VS (no white default). -->
         <Style TargetType="{x:Type ListBoxItem}">
-            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.WindowTextKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Padding" Value="2,2" />
+            <Setter Property="Padding" Value="4,3" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -72,12 +75,10 @@
             </Setter>
         </Style>
 
-        <!-- Tab strip + panel. -->
         <Style TargetType="{x:Type TabControl}">
             <Setter Property="Background" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}" />
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static vsshell:VsBrushes.ComboBoxBorderKey}}" />
-            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderThickness" Value="0" />
         </Style>
 
         <Style TargetType="{x:Type TabItem}">
@@ -85,21 +86,21 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type TabItem}">
-                        <Border x:Name="bd" Margin="0,0,2,0" Padding="9,4" BorderThickness="1,1,1,0"
-                                Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTabGradientBeginKey}}"
-                                BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTabBorderKey}}">
+                        <Border x:Name="bd" Margin="0,0,1,0" Padding="10,5" BorderThickness="0,0,0,2"
+                                Background="Transparent" BorderBrush="Transparent">
                             <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="bd" Property="Background"
-                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTabMouseOverBackgroundBeginKey}}" />
+                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarMouseOverBackgroundBeginKey}}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="bd" Property="Background"
-                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTabSelectedTabKey}}" />
+                                <Setter TargetName="bd" Property="BorderBrush"
+                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.AccentMediumKey}}" />
                                 <Setter Property="Foreground"
                                         Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTabSelectedTextKey}}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -107,17 +108,17 @@
             </Setter>
         </Style>
 
-        <!-- Default (bordered) push button, themed with hover / pressed / disabled states. -->
+        <!-- Bordered push button (primary actions like Commit). -->
         <Style TargetType="{x:Type Button}">
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ButtonTextKey}}" />
             <Setter Property="Background" Value="{DynamicResource {x:Static vsshell:VsBrushes.ButtonFaceKey}}" />
             <Setter Property="BorderBrush" Value="{DynamicResource {x:Static vsshell:VsBrushes.ComboBoxBorderKey}}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="7,2" />
+            <Setter Property="Padding" Value="8,3" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type Button}">
-                        <Border x:Name="bd" SnapsToDevicePixels="True"
+                        <Border x:Name="bd" SnapsToDevicePixels="True" CornerRadius="2"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}">
@@ -146,35 +147,34 @@
             </Setter>
         </Style>
 
-        <!-- Toolbar button = the themed button + a right margin. -->
-        <Style TargetType="{x:Type Button}" x:Key="ToolButton" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Margin" Value="0,0,4,0" />
-            <Setter Property="MinWidth" Value="24" />
-        </Style>
-
-        <!-- Inline "link" button (Diff / Hist / Stage / Discard): flat, link-coloured. -->
-        <Style TargetType="{x:Type Button}" x:Key="LinkButton">
-            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ControlLinkTextKey}}" />
+        <!-- Flat icon-only command button (toolbar + per-row actions), like a VS command bar glyph. -->
+        <Style TargetType="{x:Type Button}" x:Key="IconButton">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Margin" Value="2,0,0,0" />
-            <Setter Property="Padding" Value="4,0" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="3" />
+            <Setter Property="Margin" Value="1,0" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type Button}">
-                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter VerticalAlignment="Center" />
+                        <Border x:Name="bd" CornerRadius="3" SnapsToDevicePixels="True"
+                                Background="{TemplateBinding Background}" BorderBrush="Transparent"
+                                BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Foreground"
-                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.ControlLinkTextHoverKey}}" />
+                                <Setter TargetName="bd" Property="Background"
+                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarMouseOverBackgroundBeginKey}}" />
+                                <Setter TargetName="bd" Property="BorderBrush"
+                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarSelectedBorderKey}}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Background"
+                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarSelectedKey}}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Foreground"
-                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}" />
+                                <Setter TargetName="bd" Property="Opacity" Value="0.4" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -182,24 +182,35 @@
             </Setter>
         </Style>
 
+        <!-- Section label, VS-style: small, semi-bold, slightly muted. -->
         <Style TargetType="TextBlock" x:Key="SectionHeader">
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,6,0,2" />
+            <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
         </Style>
 
-        <!-- Double-click a changed file to open the side-by-side diff. -->
+        <!-- Actions that only appear when the row is hovered (native VS behaviour). -->
+        <Style TargetType="StackPanel" x:Key="RowActions">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="ChangeItemContainerStyle" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
             <EventSetter Event="MouseDoubleClick" Handler="OnChangeItemDoubleClick" />
         </Style>
 
-        <!-- Double-click a file-history commit to diff that commit for the file. -->
         <Style x:Key="HistoryItemContainerStyle" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
             <EventSetter Event="MouseDoubleClick" Handler="OnHistoryItemDoubleClick" />
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="6">
+    <Grid Margin="0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -207,47 +218,74 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Repository selector -->
-        <Grid Grid.Row="0" Margin="0,0,0,4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Repo:" VerticalAlignment="Center" Margin="0,0,4,0" />
-            <TextBox Grid.Column="1" VerticalAlignment="Center"
-                     Text="{Binding RepositoryPath, UpdateSourceTrigger=PropertyChanged}"
-                     ToolTip="Full path to the git working tree (the folder that contains the .git directory)." />
-            <Button Grid.Column="2" Content="Set" Style="{StaticResource ToolButton}" Margin="4,0,4,0"
-                    Command="{Binding SetRepositoryCommand}" ToolTip="Use the folder above as the git repository." />
-            <Button Grid.Column="3" Content="Auto" Style="{StaticResource ToolButton}"
-                    Command="{Binding AutoDetectCommand}" ToolTip="Detect the git repository from the open solution." />
-        </Grid>
+        <!-- ===== Repository + sync command bar ===== -->
+        <Border Grid.Row="0" Padding="6,5"
+                Background="{DynamicResource {x:Static vsshell:VsBrushes.CommandShelfBackgroundGradientKey}}"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBorderKey}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-        <!-- Branch + sync toolbar -->
-        <Grid Grid.Row="1" Margin="0,0,0,4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="Branch: " VerticalAlignment="Center" />
-                <TextBlock Text="{Binding CurrentBranch}" FontWeight="Bold" VerticalAlignment="Center" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button Content="Fetch" Style="{StaticResource ToolButton}" Command="{Binding FetchCommand}" />
-                <Button Content="Pull" Style="{StaticResource ToolButton}" Command="{Binding PullCommand}" />
-                <Button Content="Push" Style="{StaticResource ToolButton}" Command="{Binding PushCommand}" />
-                <Button Content="⟳" Style="{StaticResource ToolButton}" Command="{Binding RefreshCommand}" ToolTip="Refresh" />
-            </StackPanel>
-        </Grid>
+                <!-- Repo path -->
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <imaging:CrispImage Grid.Column="0" Width="16" Height="16" Margin="0,0,5,0"
+                                        VerticalAlignment="Center" Moniker="{x:Static catalog:KnownMonikers.GitRepository}" />
+                    <TextBox Grid.Column="1" VerticalAlignment="Center"
+                             Text="{Binding RepositoryPath, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Full path to the git working tree (the folder that contains the .git directory)." />
+                    <Button Grid.Column="2" Style="{StaticResource IconButton}" Margin="4,0,0,0"
+                            Command="{Binding SetRepositoryCommand}" ToolTip="Use the folder above as the git repository.">
+                        <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Checkmark}" />
+                    </Button>
+                    <Button Grid.Column="3" Style="{StaticResource IconButton}"
+                            Command="{Binding AutoDetectCommand}" ToolTip="Detect the git repository from the open solution.">
+                        <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Property}" />
+                    </Button>
+                </Grid>
 
-        <!-- Main tabs -->
-        <TabControl Grid.Row="2" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
+                <!-- Branch + fetch/pull/push/refresh -->
+                <Grid Grid.Row="1" Margin="0,5,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <imaging:CrispImage Grid.Column="0" Width="16" Height="16" Margin="0,0,5,0"
+                                        VerticalAlignment="Center" Moniker="{x:Static catalog:KnownMonikers.Branch}" />
+                    <TextBlock Grid.Column="1" Text="{Binding CurrentBranch}" FontWeight="SemiBold"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentBranch}" />
+                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button Style="{StaticResource IconButton}" Command="{Binding FetchCommand}" ToolTip="Fetch">
+                            <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Fetch}" />
+                        </Button>
+                        <Button Style="{StaticResource IconButton}" Command="{Binding PullCommand}" ToolTip="Pull (fast-forward only)">
+                            <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Pull}" />
+                        </Button>
+                        <Button Style="{StaticResource IconButton}" Command="{Binding PushCommand}" ToolTip="Push">
+                            <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Push}" />
+                        </Button>
+                        <Button Style="{StaticResource IconButton}" Command="{Binding RefreshCommand}" ToolTip="Refresh">
+                            <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Refresh}" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- ===== Tabs ===== -->
+        <TabControl Grid.Row="2" Margin="0" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
             <!-- Changes -->
             <TabItem Header="Changes">
-                <Grid Margin="4">
+                <Grid Margin="6,4,6,4">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -257,82 +295,136 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <!-- Commit box -->
-                    <TextBox Grid.Row="0" MinHeight="48" MaxHeight="120"
-                             AcceptsReturn="True" TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             Text="{Binding CommitMessage, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="Commit message" />
-                    <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="0,4,0,0">
-                        <Button Content="Commit" Style="{StaticResource ToolButton}" Margin="0,0,4,4" Command="{Binding CommitCommand}" />
-                        <Button Content="Commit &amp; Push" Style="{StaticResource ToolButton}" Margin="0,0,4,4" Command="{Binding CommitAndPushCommand}" />
-                        <Button Content="Stage all" Style="{StaticResource ToolButton}" Margin="0,0,4,4" Command="{Binding StageAllCommand}" />
-                        <Button Content="Unstage all" Style="{StaticResource ToolButton}" Margin="0,0,4,4" Command="{Binding UnstageAllCommand}" />
-                    </WrapPanel>
+                    <!-- Commit message with a watermark -->
+                    <Grid Grid.Row="0">
+                        <TextBox x:Name="CommitBox" MinHeight="52" MaxHeight="120"
+                                 AcceptsReturn="True" TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="{Binding CommitMessage, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Text="Enter a commit message" Margin="5,4,0,0"
+                                   Foreground="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}"
+                                   IsHitTestVisible="False" VerticalAlignment="Top"
+                                   Visibility="{Binding CommitMessage, Converter={StaticResource EmptyToVis}}" />
+                    </Grid>
 
-                    <TextBlock Grid.Row="2" Style="{StaticResource SectionHeader}">
-                        <Run Text="Staged Changes (" /><Run Text="{Binding StagedChanges.Count, Mode=OneWay}" /><Run Text=")" />
-                    </TextBlock>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,5,0,2">
+                        <Button Command="{Binding CommitCommand}" Margin="0,0,5,0" ToolTip="Commit staged changes">
+                            <StackPanel Orientation="Horizontal">
+                                <imaging:CrispImage Width="16" Height="16" Margin="0,0,4,0" Moniker="{x:Static catalog:KnownMonikers.Commit}" />
+                                <TextBlock Text="Commit" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding CommitAndPushCommand}" ToolTip="Commit staged changes and push">
+                            <StackPanel Orientation="Horizontal">
+                                <imaging:CrispImage Width="16" Height="16" Margin="0,0,4,0" Moniker="{x:Static catalog:KnownMonikers.Push}" />
+                                <TextBlock Text="Commit &amp; Push" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Staged section -->
+                    <Grid Grid.Row="2" Margin="0,6,0,2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Style="{StaticResource SectionHeader}">
+                            <Run Text="Staged Changes (" /><Run Text="{Binding StagedChanges.Count, Mode=OneWay}" /><Run Text=")" />
+                        </TextBlock>
+                        <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                                Command="{Binding UnstageAllCommand}" ToolTip="Unstage all">
+                            <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Remove}" />
+                        </Button>
+                    </Grid>
                     <ListBox Grid.Row="3" ItemsSource="{Binding StagedChanges}"
                              ItemContainerStyle="{StaticResource ChangeItemContainerStyle}"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              HorizontalContentAlignment="Stretch">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid ToolTip="{Binding ToolTip}">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="16" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="{Binding StatusGlyph}" FontWeight="Bold" />
-                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
-                                        <Button Content="Diff" Style="{StaticResource LinkButton}"
+                                    <TextBlock Grid.Column="0" Text="{Binding StatusGlyph}" FontWeight="Bold"
+                                               HorizontalAlignment="Center"
+                                               Foreground="{Binding StatusGlyph, Converter={StaticResource StatusToBrush}}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" Margin="4,0,0,0"
+                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="2" Style="{StaticResource RowActions}">
+                                        <Button Style="{StaticResource IconButton}" ToolTip="Compare with index"
                                                 Command="{Binding DataContext.OpenDiffCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                CommandParameter="{Binding}" />
-                                        <Button Content="Hist" Style="{StaticResource LinkButton}"
+                                                CommandParameter="{Binding}">
+                                            <imaging:CrispImage Width="15" Height="15" Moniker="{x:Static catalog:KnownMonikers.CompareFiles}" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" ToolTip="File history"
                                                 Command="{Binding DataContext.ShowFileHistoryCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                CommandParameter="{Binding}" />
-                                        <Button Content="Unstage" Style="{StaticResource LinkButton}"
+                                                CommandParameter="{Binding}">
+                                            <imaging:CrispImage Width="15" Height="15" Moniker="{x:Static catalog:KnownMonikers.History}" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" ToolTip="Unstage"
                                                 Command="{Binding DataContext.UnstageCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                CommandParameter="{Binding}" />
+                                                CommandParameter="{Binding}">
+                                            <imaging:CrispImage Width="15" Height="15" Moniker="{x:Static catalog:KnownMonikers.Remove}" />
+                                        </Button>
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
 
-                    <TextBlock Grid.Row="4" Style="{StaticResource SectionHeader}">
-                        <Run Text="Changes (" /><Run Text="{Binding UnstagedChanges.Count, Mode=OneWay}" /><Run Text=")" />
-                    </TextBlock>
+                    <!-- Unstaged section -->
+                    <Grid Grid.Row="4" Margin="0,6,0,2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Style="{StaticResource SectionHeader}">
+                            <Run Text="Changes (" /><Run Text="{Binding UnstagedChanges.Count, Mode=OneWay}" /><Run Text=")" />
+                        </TextBlock>
+                        <Button Grid.Column="1" Style="{StaticResource IconButton}"
+                                Command="{Binding StageAllCommand}" ToolTip="Stage all">
+                            <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Add}" />
+                        </Button>
+                    </Grid>
                     <ListBox Grid.Row="5" ItemsSource="{Binding UnstagedChanges}"
                              ItemContainerStyle="{StaticResource ChangeItemContainerStyle}"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              HorizontalContentAlignment="Stretch">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid ToolTip="{Binding ToolTip}">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="16" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="{Binding StatusGlyph}" FontWeight="Bold" />
-                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
-                                        <Button Content="Diff" Style="{StaticResource LinkButton}"
+                                    <TextBlock Grid.Column="0" Text="{Binding StatusGlyph}" FontWeight="Bold"
+                                               HorizontalAlignment="Center"
+                                               Foreground="{Binding StatusGlyph, Converter={StaticResource StatusToBrush}}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" Margin="4,0,0,0"
+                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="2" Style="{StaticResource RowActions}">
+                                        <Button Style="{StaticResource IconButton}" ToolTip="Compare with unmodified"
                                                 Command="{Binding DataContext.OpenDiffCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                CommandParameter="{Binding}" />
-                                        <Button Content="Hist" Style="{StaticResource LinkButton}"
+                                                CommandParameter="{Binding}">
+                                            <imaging:CrispImage Width="15" Height="15" Moniker="{x:Static catalog:KnownMonikers.CompareFiles}" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" ToolTip="File history"
                                                 Command="{Binding DataContext.ShowFileHistoryCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                CommandParameter="{Binding}" />
-                                        <Button Content="Stage" Style="{StaticResource LinkButton}"
-                                                Command="{Binding DataContext.StageCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                CommandParameter="{Binding}" />
-                                        <Button Content="Discard" Style="{StaticResource LinkButton}"
+                                                CommandParameter="{Binding}">
+                                            <imaging:CrispImage Width="15" Height="15" Moniker="{x:Static catalog:KnownMonikers.History}" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" ToolTip="Discard changes"
                                                 Command="{Binding DataContext.DiscardCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                CommandParameter="{Binding}" />
+                                                CommandParameter="{Binding}">
+                                            <imaging:CrispImage Width="15" Height="15" Moniker="{x:Static catalog:KnownMonikers.Undo}" />
+                                        </Button>
+                                        <Button Style="{StaticResource IconButton}" ToolTip="Stage"
+                                                Command="{Binding DataContext.StageCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}">
+                                            <imaging:CrispImage Width="15" Height="15" Moniker="{x:Static catalog:KnownMonikers.Add}" />
+                                        </Button>
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>
@@ -343,7 +435,7 @@
 
             <!-- Branches -->
             <TabItem Header="Branches">
-                <Grid Margin="4">
+                <Grid Margin="6,4,6,4">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -353,29 +445,43 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBox Grid.Column="0" Text="{Binding NewBranchName, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="New branch name" />
-                        <Button Grid.Column="1" Content="Create + checkout" Style="{StaticResource ToolButton}" Margin="4,0,0,0"
-                                Command="{Binding CreateBranchCommand}" />
+                        <Grid Grid.Column="0">
+                            <TextBox Text="{Binding NewBranchName, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Text="New branch name" Margin="5,0,0,0" IsHitTestVisible="False"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}"
+                                       Visibility="{Binding NewBranchName, Converter={StaticResource EmptyToVis}}" />
+                        </Grid>
+                        <Button Grid.Column="1" Style="{StaticResource IconButton}" Margin="4,0,0,0"
+                                Command="{Binding CreateBranchCommand}" ToolTip="Create branch and check it out">
+                            <StackPanel Orientation="Horizontal">
+                                <imaging:CrispImage Width="16" Height="16" Margin="0,0,3,0" Moniker="{x:Static catalog:KnownMonikers.NewBranch}" />
+                                <TextBlock Text="Create" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                     </Grid>
-                    <ListBox Grid.Row="1" ItemsSource="{Binding Branches}"
-                             HorizontalContentAlignment="Stretch">
+                    <ListBox Grid.Row="1" ItemsSource="{Binding Branches}" HorizontalContentAlignment="Stretch">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                                    <imaging:CrispImage Grid.Column="0" Width="16" Height="16" Margin="0,0,6,0"
+                                                        VerticalAlignment="Center" Moniker="{x:Static catalog:KnownMonikers.Branch}" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontWeight="{Binding IsCurrent, Converter={StaticResource BoolToWeight}}" />
                                         <TextBlock Text="{Binding TrackingText}" Opacity="0.6" FontSize="11" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Checkout" Style="{StaticResource LinkButton}"
-                                            VerticalAlignment="Center"
+                                    <Button Grid.Column="2" Style="{StaticResource IconButton}" VerticalAlignment="Center"
+                                            ToolTip="Check out this branch"
                                             Visibility="{Binding IsCurrent, Converter={StaticResource InverseBoolToVis}}"
                                             Command="{Binding DataContext.CheckoutCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                            CommandParameter="{Binding}" />
+                                            CommandParameter="{Binding}">
+                                        <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.CheckOutForEdit}" />
+                                    </Button>
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -385,20 +491,26 @@
 
             <!-- History -->
             <TabItem Header="History">
-                <ListBox ItemsSource="{Binding Commits}" HorizontalContentAlignment="Stretch" Margin="4">
+                <ListBox ItemsSource="{Binding Commits}" HorizontalContentAlignment="Stretch" Margin="6,4,6,4">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <StackPanel ToolTip="{Binding ToolTip}" Margin="0,1">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding ShortHash}" FontFamily="Consolas" Opacity="0.7" Margin="0,0,6,0" />
+                            <Grid ToolTip="{Binding ToolTip}" Margin="0,1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <imaging:CrispImage Grid.Column="0" Width="16" Height="16" Margin="0,2,6,0"
+                                                    VerticalAlignment="Top" Moniker="{x:Static catalog:KnownMonikers.Commit}" />
+                                <StackPanel Grid.Column="1">
                                     <TextBlock Text="{Binding Subject}" TextTrimming="CharacterEllipsis" />
+                                    <StackPanel Orientation="Horizontal" Opacity="0.6">
+                                        <TextBlock Text="{Binding ShortHash}" FontFamily="Consolas" Margin="0,0,6,0" FontSize="11" />
+                                        <TextBlock Text="{Binding Author}" FontSize="11" />
+                                        <TextBlock Text=" · " FontSize="11" />
+                                        <TextBlock Text="{Binding RelativeDate}" FontSize="11" />
+                                    </StackPanel>
                                 </StackPanel>
-                                <StackPanel Orientation="Horizontal" Opacity="0.6">
-                                    <TextBlock Text="{Binding Author}" FontSize="11" />
-                                    <TextBlock Text=" — " FontSize="11" />
-                                    <TextBlock Text="{Binding RelativeDate}" FontSize="11" />
-                                </StackPanel>
-                            </StackPanel>
+                            </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
@@ -406,14 +518,14 @@
 
             <!-- File History -->
             <TabItem Header="File History">
-                <Grid Margin="4">
+                <Grid Margin="6,4,6,4">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0" Text="{Binding FileHistoryTitle}" Style="{StaticResource SectionHeader}"
-                               TextTrimming="CharacterEllipsis"
-                               ToolTip="Use the 'Hist' button on a file, or right-click a file in Solution Explorer → 'Git for TFS: File History'." />
+                               Margin="0,0,0,4" TextTrimming="CharacterEllipsis"
+                               ToolTip="Use the history icon on a file, or right-click a file in Solution Explorer → 'Git for TFS: File History'." />
                     <ListBox Grid.Row="1" ItemsSource="{Binding FileHistoryCommits}"
                              ItemContainerStyle="{StaticResource HistoryItemContainerStyle}"
                              HorizontalContentAlignment="Stretch">
@@ -421,23 +533,27 @@
                             <DataTemplate>
                                 <Grid ToolTip="{Binding ToolTip}">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding ShortHash}" FontFamily="Consolas" Opacity="0.7" Margin="0,0,6,0" />
-                                            <TextBlock Text="{Binding Subject}" TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
+                                    <imaging:CrispImage Grid.Column="0" Width="16" Height="16" Margin="0,2,6,0"
+                                                        VerticalAlignment="Top" Moniker="{x:Static catalog:KnownMonikers.Commit}" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Subject}" TextTrimming="CharacterEllipsis" />
                                         <StackPanel Orientation="Horizontal" Opacity="0.6">
+                                            <TextBlock Text="{Binding ShortHash}" FontFamily="Consolas" Margin="0,0,6,0" FontSize="11" />
                                             <TextBlock Text="{Binding Author}" FontSize="11" />
-                                            <TextBlock Text=" — " FontSize="11" />
+                                            <TextBlock Text=" · " FontSize="11" />
                                             <TextBlock Text="{Binding RelativeDate}" FontSize="11" />
                                         </StackPanel>
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Diff" Style="{StaticResource LinkButton}" VerticalAlignment="Center"
+                                    <Button Grid.Column="2" Style="{StaticResource IconButton}" VerticalAlignment="Center"
+                                            ToolTip="Compare this commit for the file"
                                             Command="{Binding DataContext.OpenCommitDiffCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                            CommandParameter="{Binding}" />
+                                            CommandParameter="{Binding}">
+                                        <imaging:CrispImage Width="15" Height="15" Moniker="{x:Static catalog:KnownMonikers.CompareFiles}" />
+                                    </Button>
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -446,16 +562,23 @@
             </TabItem>
         </TabControl>
 
-        <!-- Status bar -->
-        <Border Grid.Row="3" Margin="0,4,0,0">
+        <!-- ===== Status bar ===== -->
+        <Border Grid.Row="3" Padding="6,3"
+                Background="{DynamicResource {x:Static vsshell:VsBrushes.CommandShelfBackgroundGradientKey}}"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBorderKey}}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" TextTrimming="CharacterEllipsis" Opacity="0.85" />
-                <TextBlock Grid.Column="1" Text="Working…" FontStyle="Italic"
-                           Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
+                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center" Opacity="0.85" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal"
+                            Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+                    <imaging:CrispImage Width="16" Height="16" Margin="0,0,4,0" Moniker="{x:Static catalog:KnownMonikers.StatusRunning}" />
+                    <TextBlock Text="Working…" FontStyle="Italic" VerticalAlignment="Center" />
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>
