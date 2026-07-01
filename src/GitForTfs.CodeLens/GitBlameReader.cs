@@ -10,6 +10,39 @@ using System.Threading.Tasks;
 
 namespace GitForTfs.CodeLens
 {
+    /// <summary>
+    /// TEMP diagnostics: appends to %TEMP%\GitForTfs.CodeLens.log so we can see what the
+    /// out-of-process CodeLens host is doing. Remove once the lens is confirmed working.
+    /// </summary>
+    internal static class Diag
+    {
+        private static readonly object Gate = new object();
+        private static readonly string LogPath =
+            Path.Combine(Path.GetTempPath(), "GitForTfs.CodeLens.log");
+
+        // Opt-in only: set the GITFORTFS_CODELENS_LOG environment variable to 1 to trace
+        // the CodeLens data-point pipeline into %TEMP%\GitForTfs.CodeLens.log. Off by
+        // default so a normal install writes nothing.
+        internal static bool Enabled =
+            Environment.GetEnvironmentVariable("GITFORTFS_CODELENS_LOG") == "1";
+
+        internal static void Log(string message)
+        {
+            if (!Enabled)
+                return;
+            try
+            {
+                lock (Gate)
+                {
+                    File.AppendAllText(LogPath,
+                        DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)
+                        + "  " + message + Environment.NewLine);
+                }
+            }
+            catch { /* diagnostics must never throw */ }
+        }
+    }
+
     /// <summary>Result of a git blame lookup for a code element's line range.</summary>
     public sealed class BlameInfo
     {
@@ -99,11 +132,18 @@ namespace GitForTfs.CodeLens
                 "--no-pager blame --porcelain -L {0},{1} -- \"{2}\"",
                 startLine, endLine, filePath);
 
+            Diag.Log($"GetLastChange dir='{dir}' lines={startLine},{endLine} file='{filePath}'");
+
             var result = await RunGitAsync(args, dir, cancellationToken).ConfigureAwait(false);
             if (result == null)
+            {
+                Diag.Log("GetLastChange: git returned null (see RunGit log)");
                 return null;
+            }
 
-            return ParseNewestCommit(result);
+            var parsed = ParseNewestCommit(result);
+            Diag.Log($"GetLastChange: parsed={(parsed == null ? "null" : parsed.Author + " / " + parsed.ShortHash)}");
+            return parsed;
         }
 
         // ------------------------------------------------------------------
@@ -295,6 +335,7 @@ namespace GitForTfs.CodeLens
                     process.Start();
 
                     var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                    var stderrTask = process.StandardError.ReadToEndAsync();
 
                     var exitTcs = new TaskCompletionSource<object>();
                     process.Exited += (s, e) => exitTcs.TrySetResult(null);
@@ -306,11 +347,14 @@ namespace GitForTfs.CodeLens
                     }
 
                     var stdout = await stdoutTask.ConfigureAwait(false);
+                    var stderr = await stderrTask.ConfigureAwait(false);
+                    Diag.Log($"RunGit exit={process.ExitCode} outLen={stdout?.Length ?? 0} err='{(stderr ?? string.Empty).Trim()}'");
                     return process.ExitCode == 0 ? stdout : null;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Diag.Log($"RunGit EXCEPTION: {ex.GetType().Name}: {ex.Message}");
                 return null;
             }
         }
