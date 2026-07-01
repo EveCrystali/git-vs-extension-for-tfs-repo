@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>GitForTfs.CodeLens</AssemblyName>
+    <RootNamespace>GitForTfs.CodeLens</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <!-- This assembly is consumed by the out-of-process CodeLens host as a MEF part.
+         It must not carry a dependency on the Visual Studio shell. -->
+    <UseWPF>false</UseWPF>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.ComponentModel.Composition" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Compile-time only: the CodeLens/editor assemblies are provided by the VS install
+         at runtime, so they must not be copied into the VSIX. -->
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.0.32112.339">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

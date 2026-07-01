@@ -31,6 +31,16 @@
             <Setter Property="Margin" Value="0,6,0,2" />
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
         </Style>
+
+        <!-- Double-click a changed file to open the side-by-side diff. -->
+        <Style x:Key="ChangeItemContainerStyle" TargetType="ListBoxItem">
+            <EventSetter Event="MouseDoubleClick" Handler="OnChangeItemDoubleClick" />
+        </Style>
+
+        <!-- Double-click a file-history commit to diff that commit for the file. -->
+        <Style x:Key="HistoryItemContainerStyle" TargetType="ListBoxItem">
+            <EventSetter Event="MouseDoubleClick" Handler="OnHistoryItemDoubleClick" />
+        </Style>
     </UserControl.Resources>
 
     <Grid Margin="6">
@@ -78,7 +88,7 @@
         </Grid>
 
         <!-- Main tabs -->
-        <TabControl Grid.Row="2">
+        <TabControl Grid.Row="2" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
             <!-- Changes -->
             <TabItem Header="Changes">
                 <Grid Margin="4">
@@ -108,6 +118,7 @@
                         <Run Text="Staged Changes (" /><Run Text="{Binding StagedChanges.Count, Mode=OneWay}" /><Run Text=")" />
                     </TextBlock>
                     <ListBox Grid.Row="3" ItemsSource="{Binding StagedChanges}"
+                             ItemContainerStyle="{StaticResource ChangeItemContainerStyle}"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              HorizontalContentAlignment="Stretch">
                         <ListBox.ItemTemplate>
@@ -119,13 +130,18 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="{Binding StatusGlyph}" FontWeight="Bold" />
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                        <TextBlock Text="{Binding FileName}" />
-                                        <TextBlock Text="{Binding Directory}" Opacity="0.6" Margin="6,0,0,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                        <Button Content="Diff" Style="{StaticResource LinkButton}"
+                                                Command="{Binding DataContext.OpenDiffCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}" />
+                                        <Button Content="Hist" Style="{StaticResource LinkButton}"
+                                                Command="{Binding DataContext.ShowFileHistoryCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}" />
+                                        <Button Content="Unstage" Style="{StaticResource LinkButton}"
+                                                Command="{Binding DataContext.UnstageCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}" />
                                     </StackPanel>
-                                    <Button Grid.Column="2" Content="Unstage" Style="{StaticResource LinkButton}"
-                                            Command="{Binding DataContext.UnstageCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                            CommandParameter="{Binding}" />
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -135,6 +151,7 @@
                         <Run Text="Changes (" /><Run Text="{Binding UnstagedChanges.Count, Mode=OneWay}" /><Run Text=")" />
                     </TextBlock>
                     <ListBox Grid.Row="5" ItemsSource="{Binding UnstagedChanges}"
+                             ItemContainerStyle="{StaticResource ChangeItemContainerStyle}"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              HorizontalContentAlignment="Stretch">
                         <ListBox.ItemTemplate>
@@ -146,11 +163,14 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="{Binding StatusGlyph}" FontWeight="Bold" />
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                        <TextBlock Text="{Binding FileName}" />
-                                        <TextBlock Text="{Binding Directory}" Opacity="0.6" Margin="6,0,0,0" />
-                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                        <Button Content="Diff" Style="{StaticResource LinkButton}"
+                                                Command="{Binding DataContext.OpenDiffCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}" />
+                                        <Button Content="Hist" Style="{StaticResource LinkButton}"
+                                                Command="{Binding DataContext.ShowFileHistoryCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}" />
                                         <Button Content="Stage" Style="{StaticResource LinkButton}"
                                                 Command="{Binding DataContext.StageCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                 CommandParameter="{Binding}" />
@@ -226,6 +246,47 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
+            </TabItem>
+
+            <!-- File History -->
+            <TabItem Header="File History">
+                <Grid Margin="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="{Binding FileHistoryTitle}" Style="{StaticResource SectionHeader}"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="Use the 'Hist' button on a file, or right-click a file in Solution Explorer → 'Git for TFS: File History'." />
+                    <ListBox Grid.Row="1" ItemsSource="{Binding FileHistoryCommits}"
+                             ItemContainerStyle="{StaticResource HistoryItemContainerStyle}"
+                             HorizontalContentAlignment="Stretch">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ToolTip="{Binding ToolTip}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding ShortHash}" FontFamily="Consolas" Opacity="0.7" Margin="0,0,6,0" />
+                                            <TextBlock Text="{Binding Subject}" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Opacity="0.6">
+                                            <TextBlock Text="{Binding Author}" FontSize="11" />
+                                            <TextBlock Text=" — " FontSize="11" />
+                                            <TextBlock Text="{Binding RelativeDate}" FontSize="11" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Diff" Style="{StaticResource LinkButton}" VerticalAlignment="Center"
+                                            Command="{Binding DataContext.OpenCommitDiffCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
             </TabItem>
         </TabControl>
 

@@ -3,10 +3,12 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using EnvDTE;
 using GitForTfs.Services;
 using GitForTfs.ViewModels;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Task = System.Threading.Tasks.Task;
 
 namespace GitForTfs.ToolWindows
@@ -22,7 +24,7 @@ namespace GitForTfs.ToolWindows
             InitializeComponent();
 
             var logger = new OutputLogger(ServiceProvider.GlobalProvider);
-            _viewModel = new GitToolWindowViewModel(GetSolutionDirectoryAsync, logger.Log);
+            _viewModel = new GitToolWindowViewModel(GetSolutionDirectoryAsync, OpenDiffAsync, logger.Log);
             DataContext = _viewModel;
 
             Loaded += OnLoaded;
@@ -38,6 +40,61 @@ namespace GitForTfs.ToolWindows
             {
                 await _viewModel.InitializeAsync();
             }).FileAndForget("gitfortfs/initialize");
+        }
+
+        private void OnChangeItemDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is ListBoxItem container && container.DataContext is ChangeItemViewModel change
+                && _viewModel.OpenDiffCommand.CanExecute(change))
+            {
+                _viewModel.OpenDiffCommand.Execute(change);
+            }
+        }
+
+        private void OnHistoryItemDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is ListBoxItem container && container.DataContext is CommitItemViewModel commit
+                && _viewModel.OpenCommitDiffCommand.CanExecute(commit))
+            {
+                _viewModel.OpenCommitDiffCommand.Execute(commit);
+            }
+        }
+
+        /// <summary>Entry point used by the Solution Explorer "File History" command.</summary>
+        public void ShowFileHistoryForPath(string absolutePath)
+        {
+            ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await _viewModel.ShowFileHistoryForPathAsync(absolutePath);
+            }).FileAndForget("gitfortfs/filehistory");
+        }
+
+        /// <summary>
+        /// Opens Visual Studio's built-in side-by-side diff viewer for a prepared comparison.
+        /// </summary>
+        private async Task OpenDiffAsync(DiffRequest request)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            if (!(Package.GetGlobalService(typeof(SVsDifferenceService)) is IVsDifferenceService diffService))
+                return;
+
+            uint options = 0;
+            if (request.LeftIsTemporary)
+                options |= (uint)__VSDIFFSERVICEOPTIONS.VSDIFFOPT_LeftFileIsTemporary;
+            if (request.RightIsTemporary)
+                options |= (uint)__VSDIFFSERVICEOPTIONS.VSDIFFOPT_RightFileIsTemporary;
+
+            diffService.OpenComparisonWindow2(
+                request.LeftFile,
+                request.RightFile,
+                request.Caption,
+                request.Caption,
+                request.LeftLabel,
+                request.RightLabel,
+                null,
+                null,
+                options);
         }
 
         /// <summary>

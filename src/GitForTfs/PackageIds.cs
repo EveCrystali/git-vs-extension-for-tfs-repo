@@ -19,6 +19,8 @@ namespace GitForTfs
     internal static class PackageIds
     {
         public const int GitMenuGroup = 0x1020;
+        public const int SolutionExplorerGroup = 0x1030;
         public const int OpenToolWindowCommand = 0x0100;
+        public const int FileHistoryCommand = 0x0200;
     }
 }

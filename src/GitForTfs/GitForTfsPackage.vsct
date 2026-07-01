@@ -10,6 +10,9 @@
       <Group guid="guidGitForTfsCmdSet" id="GitMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_VIEW" />
       </Group>
+      <Group guid="guidGitForTfsCmdSet" id="SolutionExplorerGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_ITEMNODE" />
+      </Group>
     </Groups>
 
     <Buttons>
@@ -17,6 +20,12 @@
         <Parent guid="guidGitForTfsCmdSet" id="GitMenuGroup" />
         <Strings>
           <ButtonText>Git for TFS</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidGitForTfsCmdSet" id="FileHistoryCommand" priority="0x0100" type="Button">
+        <Parent guid="guidGitForTfsCmdSet" id="SolutionExplorerGroup" />
+        <Strings>
+          <ButtonText>Git for TFS: File History</ButtonText>
         </Strings>
       </Button>
     </Buttons>
@@ -28,7 +37,9 @@
 
     <GuidSymbol name="guidGitForTfsCmdSet" value="{b7f6d2a4-3c81-4e57-9a0b-1f2e3d4c5b61}">
       <IDSymbol name="GitMenuGroup" value="0x1020" />
+      <IDSymbol name="SolutionExplorerGroup" value="0x1030" />
       <IDSymbol name="OpenToolWindowCommand" value="0x0100" />
+      <IDSymbol name="FileHistoryCommand" value="0x0200" />
     </GuidSymbol>
   </Symbols>
 

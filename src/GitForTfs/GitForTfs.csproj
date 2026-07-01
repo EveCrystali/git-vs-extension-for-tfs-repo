@@ -63,6 +63,7 @@
     <Compile Include="PackageIds.cs" />
     <Compile Include="GitForTfsPackage.cs" />
     <Compile Include="Commands\OpenGitToolWindowCommand.cs" />
+    <Compile Include="Commands\ShowFileHistoryCommand.cs" />
     <Compile Include="Services\GitResult.cs" />
     <Compile Include="Services\GitModels.cs" />
     <Compile Include="Services\GitCliService.cs" />
@@ -73,6 +74,7 @@
     <Compile Include="Mvvm\AsyncRelayCommand.cs" />
     <Compile Include="Mvvm\Converters.cs" />
     <Compile Include="ViewModels\GitToolWindowViewModel.cs" />
+    <Compile Include="ViewModels\DiffRequest.cs" />
     <Compile Include="ViewModels\ChangeItemViewModel.cs" />
     <Compile Include="ViewModels\BranchItemViewModel.cs" />
     <Compile Include="ViewModels\CommitItemViewModel.cs" />
@@ -100,6 +102,16 @@
     <None Include="source.extension.vsixmanifest">
       <SubType>Designer</SubType>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The CodeLens provider ships inside the VSIX (registered as a MEF component in the
+         manifest) but runs in the out-of-process CodeLens host, so we don't reference its
+         output assembly from this package. -->
+    <ProjectReference Include="..\GitForTfs.CodeLens\GitForTfs.CodeLens.csproj">
+      <Name>GitForTfs.CodeLens</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

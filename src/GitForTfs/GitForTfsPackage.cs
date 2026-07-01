@@ -33,6 +33,7 @@ namespace GitForTfs
         {
             await base.InitializeAsync(cancellationToken, progress);
             await OpenGitToolWindowCommand.InitializeAsync(this);
+            await ShowFileHistoryCommand.InitializeAsync(this);
         }
     }
 }

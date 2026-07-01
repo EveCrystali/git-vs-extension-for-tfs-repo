@@ -1,5 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using GitForTfs.Mvvm;
@@ -15,6 +17,7 @@ namespace GitForTfs.ViewModels
     {
         private readonly GitCliService _git;
         private readonly Func<Task<string>> _solutionDirectoryProvider;
+        private readonly Func<DiffRequest, Task> _openDiff;
         private readonly Action<string> _log;
 
         private string _repositoryPath;
@@ -22,12 +25,16 @@ namespace GitForTfs.ViewModels
         private string _commitMessage;
         private string _newBranchName;
         private string _statusMessage;
+        private string _fileHistoryTitle;
+        private string _historyFileRelativePath;
+        private int _selectedTabIndex;
         private bool _isBusy;
         private bool _hasRepository;
 
-        public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Action<string> log)
+        public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Func<DiffRequest, Task> openDiff, Action<string> log)
         {
             _solutionDirectoryProvider = solutionDirectoryProvider;
+            _openDiff = openDiff;
             _log = log;
             _git = new GitCliService(log);
 
@@ -35,6 +42,7 @@ namespace GitForTfs.ViewModels
             UnstagedChanges = new ObservableCollection<ChangeItemViewModel>();
             Branches = new ObservableCollection<BranchItemViewModel>();
             Commits = new ObservableCollection<CommitItemViewModel>();
+            FileHistoryCommits = new ObservableCollection<CommitItemViewModel>();
 
             RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => HasRepository && !IsBusy);
             AutoDetectCommand = new AsyncRelayCommand(_ => AutoDetectRepositoryAsync(), _ => !IsBusy);
@@ -55,6 +63,10 @@ namespace GitForTfs.ViewModels
 
             CreateBranchCommand = new AsyncRelayCommand(_ => CreateBranchAsync(), _ => HasRepository && !IsBusy && !string.IsNullOrWhiteSpace(NewBranchName));
             CheckoutCommand = new AsyncRelayCommand(p => CheckoutAsync(p as BranchItemViewModel), _ => HasRepository && !IsBusy);
+
+            OpenDiffCommand = new AsyncRelayCommand(p => OpenDiffAsync(p as ChangeItemViewModel), _ => HasRepository && !IsBusy);
+            ShowFileHistoryCommand = new AsyncRelayCommand(p => ShowFileHistoryAsync(p as ChangeItemViewModel), _ => HasRepository && !IsBusy);
+            OpenCommitDiffCommand = new AsyncRelayCommand(p => OpenCommitDiffAsync(p as CommitItemViewModel), _ => HasRepository && !IsBusy);
         }
 
         // -----------------------------------------------------------------
@@ -65,6 +77,7 @@ namespace GitForTfs.ViewModels
         public ObservableCollection<ChangeItemViewModel> UnstagedChanges { get; }
         public ObservableCollection<BranchItemViewModel> Branches { get; }
         public ObservableCollection<CommitItemViewModel> Commits { get; }
+        public ObservableCollection<CommitItemViewModel> FileHistoryCommits { get; }
 
         // -----------------------------------------------------------------
         // Bindable state
@@ -121,6 +134,21 @@ namespace GitForTfs.ViewModels
         public bool CanCommit =>
             HasRepository && !IsBusy && StagedChanges.Count > 0 && !string.IsNullOrWhiteSpace(CommitMessage);
 
+        public string FileHistoryTitle
+        {
+            get => _fileHistoryTitle;
+            set => SetProperty(ref _fileHistoryTitle, value);
+        }
+
+        public bool HasFileHistory => FileHistoryCommits.Count > 0;
+
+        /// <summary>Bound to the tab control so code can bring a tab to the front programmatically.</summary>
+        public int SelectedTabIndex
+        {
+            get => _selectedTabIndex;
+            set => SetProperty(ref _selectedTabIndex, value);
+        }
+
         // -----------------------------------------------------------------
         // Commands
         // -----------------------------------------------------------------
@@ -140,6 +168,9 @@ namespace GitForTfs.ViewModels
         public ICommand PushCommand { get; }
         public ICommand CreateBranchCommand { get; }
         public ICommand CheckoutCommand { get; }
+        public ICommand OpenDiffCommand { get; }
+        public ICommand ShowFileHistoryCommand { get; }
+        public ICommand OpenCommitDiffCommand { get; }
 
         // -----------------------------------------------------------------
         // Lifecycle
@@ -365,6 +396,187 @@ namespace GitForTfs.ViewModels
             item == null || item.IsCurrent
                 ? Task.CompletedTask
                 : RunAndRefreshAsync($"Checkout {item.Name}", () => _git.CheckoutAsync(item.Name));
+
+        // -----------------------------------------------------------------
+        // Diff viewer
+        // -----------------------------------------------------------------
+
+        private async Task OpenDiffAsync(ChangeItemViewModel item)
+        {
+            if (item == null || _openDiff == null)
+                return;
+
+            IsBusy = true;
+            try
+            {
+                var relPath = item.Path;
+                var oldRelPath = item.Change.OriginalPath ?? relPath;
+                string leftFile, rightFile, leftLabel, rightLabel;
+                bool rightIsTemporary;
+
+                if (item.Change.Stage == GitChangeStage.Untracked)
+                {
+                    // Nothing to compare against yet: empty vs the new file.
+                    leftFile = await WriteTempBlobAsync(string.Empty, relPath, "empty").ConfigureAwait(true);
+                    rightFile = GetWorkingFilePath(relPath);
+                    rightIsTemporary = false; // real working-tree file — must NOT be deleted
+                    leftLabel = "(new file)";
+                    rightLabel = relPath + " (working tree)";
+                }
+                else if (item.Change.Stage == GitChangeStage.Staged)
+                {
+                    // Staged: HEAD vs index.
+                    leftFile = await WriteTempBlobAsync("HEAD:" + oldRelPath, relPath, "HEAD").ConfigureAwait(true);
+                    rightFile = await WriteTempBlobAsync(":" + relPath, relPath, "index").ConfigureAwait(true);
+                    rightIsTemporary = true;
+                    leftLabel = relPath + " (HEAD)";
+                    rightLabel = relPath + " (staged)";
+                }
+                else
+                {
+                    // Unstaged: index vs working tree.
+                    var isDeleted = item.Change.StatusCode == 'D';
+                    leftFile = await WriteTempBlobAsync(":" + oldRelPath, relPath, "index").ConfigureAwait(true);
+                    rightFile = isDeleted
+                        ? await WriteTempBlobAsync(string.Empty, relPath, "deleted").ConfigureAwait(true)
+                        : GetWorkingFilePath(relPath);
+                    rightIsTemporary = isDeleted; // only the empty placeholder is temporary
+                    leftLabel = relPath + " (index)";
+                    rightLabel = isDeleted ? "(deleted)" : relPath + " (working tree)";
+                }
+
+                await _openDiff(new DiffRequest(leftFile, rightFile, "Diff: " + item.FileName, leftLabel, rightLabel,
+                    leftIsTemporary: true, rightIsTemporary: rightIsTemporary)).ConfigureAwait(true);
+                StatusMessage = "Opened diff for " + item.FileName;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = "Could not open diff: " + ex.Message;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        private async Task OpenCommitDiffAsync(CommitItemViewModel commit)
+        {
+            if (commit == null || _openDiff == null || string.IsNullOrEmpty(_historyFileRelativePath))
+                return;
+
+            IsBusy = true;
+            try
+            {
+                var relPath = _historyFileRelativePath;
+                var fileName = Path.GetFileName(relPath);
+                var hash = commit.Commit.FullHash;
+
+                var leftFile = await WriteTempBlobAsync($"{hash}~1:{relPath}", relPath, commit.ShortHash + "~1").ConfigureAwait(true);
+                var rightFile = await WriteTempBlobAsync($"{hash}:{relPath}", relPath, commit.ShortHash).ConfigureAwait(true);
+
+                await _openDiff(new DiffRequest(
+                    leftFile, rightFile,
+                    $"Diff: {fileName} @ {commit.ShortHash}",
+                    $"{fileName} ({commit.ShortHash}~1)",
+                    $"{fileName} ({commit.ShortHash})")).ConfigureAwait(true);
+
+                StatusMessage = $"Opened diff for {fileName} at {commit.ShortHash}";
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = "Could not open diff: " + ex.Message;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        private string GetWorkingFilePath(string relativePath)
+        {
+            var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
+            return Path.Combine(_git.WorkingDirectory ?? string.Empty, normalized);
+        }
+
+        private async Task<string> WriteTempBlobAsync(string revisionSpec, string relativePathForExtension, string tag)
+        {
+            var content = string.IsNullOrEmpty(revisionSpec)
+                ? string.Empty
+                : await _git.GetBlobContentAsync(revisionSpec).ConfigureAwait(true);
+
+            var ext = Path.GetExtension(relativePathForExtension);
+            var baseName = Path.GetFileNameWithoutExtension(relativePathForExtension);
+            var safeTag = tag.Replace(':', '_').Replace('~', '_').Replace('/', '_').Replace('\\', '_');
+            var fileName = $"{baseName}.{safeTag}{ext}";
+
+            var dir = Path.Combine(Path.GetTempPath(), "GitForTfs", "diff");
+            Directory.CreateDirectory(dir);
+            var fullPath = Path.Combine(dir, fileName);
+
+            File.WriteAllText(fullPath, content, new UTF8Encoding(false));
+            return fullPath;
+        }
+
+        // -----------------------------------------------------------------
+        // Per-file history
+        // -----------------------------------------------------------------
+
+        private Task ShowFileHistoryAsync(ChangeItemViewModel item) =>
+            item == null ? Task.CompletedTask : ShowFileHistoryForPathAsync(item.Path);
+
+        /// <summary>
+        /// Loads the commit history for a file and brings the "File History" tab forward.
+        /// <paramref name="path"/> may be absolute (e.g. from Solution Explorer) or already
+        /// relative to the repository root.
+        /// </summary>
+        public async Task ShowFileHistoryForPathAsync(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return;
+
+            if (!_git.HasWorkingDirectory)
+            {
+                StatusMessage = "Set a git repository first.";
+                return;
+            }
+
+            var relPath = ToRepositoryRelativePath(path);
+
+            IsBusy = true;
+            try
+            {
+                _historyFileRelativePath = relPath;
+                FileHistoryTitle = "History: " + relPath;
+
+                var commits = await _git.GetFileLogAsync(relPath).ConfigureAwait(true);
+                FileHistoryCommits.Clear();
+                foreach (var commit in commits)
+                    FileHistoryCommits.Add(new CommitItemViewModel(commit));
+
+                RaisePropertyChanged(nameof(HasFileHistory));
+                SelectedTabIndex = 3; // File History tab
+                StatusMessage = $"{FileHistoryCommits.Count} commit(s) touched {relPath}";
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        private string ToRepositoryRelativePath(string path)
+        {
+            var root = _git.WorkingDirectory;
+            if (string.IsNullOrEmpty(root) || !Path.IsPathRooted(path))
+                return path.Replace('\\', '/');
+
+            var fullPath = Path.GetFullPath(path);
+            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            if (fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+                return fullPath.Substring(fullRoot.Length).Replace('\\', '/');
+
+            return path.Replace('\\', '/');
+        }
 
         // -----------------------------------------------------------------
         // Shared runner
