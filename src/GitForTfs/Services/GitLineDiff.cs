@@ -162,7 +162,9 @@ namespace GitForTfs.Services
                 using (var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true })
                 {
                     process.Start();
+                    // Drain both pipes: if stderr fills while unread, git blocks and we deadlock.
                     var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                    var stderrTask = process.StandardError.ReadToEndAsync();
 
                     var exitTcs = new TaskCompletionSource<object>();
                     process.Exited += (s, e) => exitTcs.TrySetResult(null);
@@ -175,6 +177,7 @@ namespace GitForTfs.Services
                     }
 
                     var stdout = await stdoutTask.ConfigureAwait(false);
+                    await stderrTask.ConfigureAwait(false);
                     return process.ExitCode == 0 ? stdout : null;
                 }
             }

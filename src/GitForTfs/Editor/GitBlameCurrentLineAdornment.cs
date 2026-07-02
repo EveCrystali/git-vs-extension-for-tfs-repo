@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using GitForTfs.Services;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.Formatting;
 using Microsoft.VisualStudio.Utilities;
@@ -59,7 +61,7 @@ namespace GitForTfs.Editor
                 return;
 
             // The manager wires itself to the view's events and lives as long as the view.
-            _ = new GitBlameCurrentLineManager(textView, document.FilePath);
+            _ = new GitBlameCurrentLineManager(textView, document);
         }
     }
 
@@ -68,23 +70,46 @@ namespace GitForTfs.Editor
     {
         private readonly IWpfTextView _view;
         private readonly IAdornmentLayer _layer;
+        private readonly ITextDocument _document;
         private readonly string _filePath;
+
+        // Blame is expensive (one git process per lookup); cache it per line so navigating
+        // up/down previously-visited lines is instant and spawns no git. Cleared whenever the
+        // buffer changes (line numbers shift) or the file is saved (blame results change).
+        private readonly Dictionary<int, LineBlame> _cache = new Dictionary<int, LineBlame>();
 
         private CancellationTokenSource _cts;
         private int _blamedLine = -1;
         private LineBlame _blame;
 
-        public GitBlameCurrentLineManager(IWpfTextView view, string filePath)
+        public GitBlameCurrentLineManager(IWpfTextView view, ITextDocument document)
         {
             _view = view;
-            _filePath = filePath;
+            _document = document;
+            _filePath = document.FilePath;
             _layer = view.GetAdornmentLayer(GitBlameAdornmentLayer.LayerName);
 
             _view.Caret.PositionChanged += OnCaretPositionChanged;
             _view.LayoutChanged += OnLayoutChanged;
+            _view.TextBuffer.Changed += OnBufferChanged;
+            _document.FileActionOccurred += OnFileActionOccurred;
             _view.Closed += OnClosed;
 
             ScheduleBlame();
+        }
+
+        private void OnBufferChanged(object sender, TextContentChangedEventArgs e) => InvalidateCache();
+
+        private void OnFileActionOccurred(object sender, TextDocumentFileActionEventArgs e)
+        {
+            if (e.FileActionType == FileActionTypes.ContentSavedToDisk)
+                InvalidateCache();
+        }
+
+        private void InvalidateCache()
+        {
+            _cache.Clear();
+            _blamedLine = -1; // force the current line to be recomputed
         }
 
         private int CurrentCaretLine()
@@ -113,6 +138,8 @@ namespace GitForTfs.Editor
         {
             _view.Caret.PositionChanged -= OnCaretPositionChanged;
             _view.LayoutChanged -= OnLayoutChanged;
+            _view.TextBuffer.Changed -= OnBufferChanged;
+            _document.FileActionOccurred -= OnFileActionOccurred;
             _view.Closed -= OnClosed;
             _cts?.Cancel();
         }
@@ -120,6 +147,16 @@ namespace GitForTfs.Editor
         private void ScheduleBlame()
         {
             var line = CurrentCaretLine();
+
+            // Cache hit → draw instantly, spawning no git process and skipping the debounce.
+            if (_cache.TryGetValue(line, out var cached))
+            {
+                _blamedLine = line;
+                _blame = (cached != null && !cached.IsUncommitted) ? cached : null;
+                Draw();
+                return;
+            }
+
             _cts?.Cancel();
             var cts = _cts = new CancellationTokenSource();
             var token = cts.Token;
@@ -133,7 +170,11 @@ namespace GitForTfs.Editor
                     var blame = await GitLineBlame.GetLineBlameAsync(_filePath, line, token).ConfigureAwait(false);
 
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(token);
-                    if (token.IsCancellationRequested || CurrentCaretLine() != line)
+                    if (token.IsCancellationRequested)
+                        return;
+
+                    _cache[line] = blame; // memoize (even a null/uncommitted result) until the next edit/save
+                    if (CurrentCaretLine() != line)
                         return;
 
                     _blamedLine = line;
