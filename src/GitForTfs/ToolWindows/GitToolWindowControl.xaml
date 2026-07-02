@@ -320,6 +320,11 @@
                                 <TextBlock Text="Commit &amp; Push" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
+                        <Button Style="{StaticResource IconButton}" Margin="6,0,0,0"
+                                Command="{Binding GenerateCommitDiffCommand}"
+                                ToolTip="Write the staged diff (git diff --cached) to a file and open it — paste it to an AI to draft a commit message">
+                            <imaging:CrispImage Width="16" Height="16" Moniker="{x:Static catalog:KnownMonikers.Comment}" />
+                        </Button>
                     </StackPanel>
 
                     <!-- Staged section -->

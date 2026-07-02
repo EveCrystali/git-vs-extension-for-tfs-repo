@@ -18,6 +18,7 @@ namespace GitForTfs.ViewModels
         private readonly GitCliService _git;
         private readonly Func<Task<string>> _solutionDirectoryProvider;
         private readonly Func<DiffRequest, Task> _openDiff;
+        private readonly Func<string, Task> _openDocument;
         private readonly Action<string> _log;
 
         private string _repositoryPath;
@@ -31,10 +32,11 @@ namespace GitForTfs.ViewModels
         private bool _isBusy;
         private bool _hasRepository;
 
-        public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Func<DiffRequest, Task> openDiff, Action<string> log)
+        public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Func<DiffRequest, Task> openDiff, Func<string, Task> openDocument, Action<string> log)
         {
             _solutionDirectoryProvider = solutionDirectoryProvider;
             _openDiff = openDiff;
+            _openDocument = openDocument;
             _log = log;
             _git = new GitCliService(log);
 
@@ -67,6 +69,7 @@ namespace GitForTfs.ViewModels
             OpenDiffCommand = new AsyncRelayCommand(p => OpenDiffAsync(p as ChangeItemViewModel), _ => HasRepository && !IsBusy);
             ShowFileHistoryCommand = new AsyncRelayCommand(p => ShowFileHistoryAsync(p as ChangeItemViewModel), _ => HasRepository && !IsBusy);
             OpenCommitDiffCommand = new AsyncRelayCommand(p => OpenCommitDiffAsync(p as CommitItemViewModel), _ => HasRepository && !IsBusy);
+            GenerateCommitDiffCommand = new AsyncRelayCommand(_ => GenerateCommitDiffAsync(), _ => HasRepository && !IsBusy);
         }
 
         // -----------------------------------------------------------------
@@ -171,6 +174,7 @@ namespace GitForTfs.ViewModels
         public ICommand OpenDiffCommand { get; }
         public ICommand ShowFileHistoryCommand { get; }
         public ICommand OpenCommitDiffCommand { get; }
+        public ICommand GenerateCommitDiffCommand { get; }
 
         // -----------------------------------------------------------------
         // Lifecycle
@@ -485,6 +489,50 @@ namespace GitForTfs.ViewModels
             catch (Exception ex)
             {
                 StatusMessage = "Could not open diff: " + ex.Message;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        /// <summary>
+        /// Writes the full staged diff (<c>git diff --cached</c>) to a temp file and opens it in
+        /// the editor — handy for pasting into an AI to draft a commit message.
+        /// </summary>
+        private async Task GenerateCommitDiffAsync()
+        {
+            if (_openDocument == null)
+                return;
+
+            IsBusy = true;
+            try
+            {
+                var result = await _git.GetCachedDiffAsync().ConfigureAwait(true);
+                if (!result.Success)
+                {
+                    StatusMessage = "Could not read the staged diff — see the Git output window.";
+                    return;
+                }
+
+                var diff = result.StandardOutput;
+                if (string.IsNullOrWhiteSpace(diff))
+                {
+                    StatusMessage = "Nothing staged — stage changes first, then generate the diff.";
+                    return;
+                }
+
+                var dir = Path.Combine(Path.GetTempPath(), "GitForTfs");
+                Directory.CreateDirectory(dir);
+                var file = Path.Combine(dir, "staged-diff.diff");
+                File.WriteAllText(file, diff, new UTF8Encoding(false));
+
+                await _openDocument(file).ConfigureAwait(true);
+                StatusMessage = "Opened the staged diff — paste it to your AI for a commit message.";
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = "Could not generate the staged diff: " + ex.Message;
             }
             finally
             {

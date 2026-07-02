@@ -24,7 +24,7 @@ namespace GitForTfs.ToolWindows
             InitializeComponent();
 
             var logger = new OutputLogger(ServiceProvider.GlobalProvider);
-            _viewModel = new GitToolWindowViewModel(GetSolutionDirectoryAsync, OpenDiffAsync, logger.Log);
+            _viewModel = new GitToolWindowViewModel(GetSolutionDirectoryAsync, OpenDiffAsync, OpenDocumentAsync, logger.Log);
             DataContext = _viewModel;
 
             Loaded += OnLoaded;
@@ -95,6 +95,15 @@ namespace GitForTfs.ToolWindows
                 null,
                 null,
                 options);
+        }
+
+        /// <summary>Opens a file (e.g. the generated staged-diff scratch file) in a VS editor tab.</summary>
+        private async Task OpenDocumentAsync(string filePath)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            if (Package.GetGlobalService(typeof(DTE)) is DTE dte)
+                dte.ItemOperations.OpenFile(filePath, EnvDTE.Constants.vsViewKindTextView);
         }
 
         /// <summary>
