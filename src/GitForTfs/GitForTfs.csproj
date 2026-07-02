@@ -73,9 +73,11 @@
     <Compile Include="Services\GitModels.cs" />
     <Compile Include="Services\GitCliService.cs" />
     <Compile Include="Services\GitLineBlame.cs" />
+    <Compile Include="Services\GitLineDiff.cs" />
     <Compile Include="Services\SettingsStore.cs" />
     <Compile Include="Services\OutputLogger.cs" />
     <Compile Include="Editor\GitBlameCurrentLineAdornment.cs" />
+    <Compile Include="Editor\GitChangeMargin.cs" />
     <Compile Include="Mvvm\ViewModelBase.cs" />
     <Compile Include="Mvvm\RelayCommand.cs" />
     <Compile Include="Mvvm\AsyncRelayCommand.cs" />
