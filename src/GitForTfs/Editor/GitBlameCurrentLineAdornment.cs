@@ -73,12 +73,15 @@ namespace GitForTfs.Editor
         private readonly ITextDocument _document;
         private readonly string _filePath;
 
-        // Blame is expensive (one git process per lookup); cache it per line so navigating
-        // up/down previously-visited lines is instant and spawns no git. Cleared whenever the
-        // buffer changes (line numbers shift) or the file is saved (blame results change).
+        // Blame is expensive (one git process per lookup); the whole file is blamed once and
+        // cached per line, so every line (not just revisited ones) draws instantly with no git.
+        // Cleared whenever the buffer changes (line numbers shift) or the file is saved.
         private readonly Dictionary<int, LineBlame> _cache = new Dictionary<int, LineBlame>();
 
-        private CancellationTokenSource _cts;
+        // Separate tokens so a whole-file prefetch and an on-demand single-line blame never
+        // cancel each other.
+        private CancellationTokenSource _prefetchCts;
+        private CancellationTokenSource _lineCts;
         private int _blamedLine = -1;
         private LineBlame _blame;
 
@@ -95,21 +98,60 @@ namespace GitForTfs.Editor
             _document.FileActionOccurred += OnFileActionOccurred;
             _view.Closed += OnClosed;
 
-            ScheduleBlame();
+            Prefetch();
         }
 
         private void OnBufferChanged(object sender, TextContentChangedEventArgs e) => InvalidateCache();
 
         private void OnFileActionOccurred(object sender, TextDocumentFileActionEventArgs e)
         {
+            // After a save the file on disk matches the buffer again, so re-blame the whole file.
             if (e.FileActionType == FileActionTypes.ContentSavedToDisk)
+            {
                 InvalidateCache();
+                Prefetch();
+            }
         }
 
         private void InvalidateCache()
         {
+            _prefetchCts?.Cancel(); // a running prefetch is now stale
             _cache.Clear();
             _blamedLine = -1; // force the current line to be recomputed
+        }
+
+        /// <summary>
+        /// Blames the whole file in one git call and fills the cache, then draws the current
+        /// line. Runs on load and after each save (when the buffer matches disk).
+        /// </summary>
+        private void Prefetch()
+        {
+            _prefetchCts?.Cancel();
+            var cts = _prefetchCts = new CancellationTokenSource();
+            var token = cts.Token;
+
+            ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                try
+                {
+                    var map = await GitLineBlame.GetFileBlameAsync(_filePath, token).ConfigureAwait(false);
+
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(token);
+                    if (token.IsCancellationRequested)
+                        return;
+
+                    if (map != null)
+                    {
+                        foreach (var kv in map)
+                            _cache[kv.Key] = kv.Value;
+                    }
+
+                    // Redraw the current line from the freshly filled cache.
+                    _blamedLine = -1;
+                    ScheduleBlame();
+                }
+                catch (OperationCanceledException) { }
+            }).FileAndForget("gitfortfs/blame-prefetch");
         }
 
         private int CurrentCaretLine()
@@ -141,7 +183,8 @@ namespace GitForTfs.Editor
             _view.TextBuffer.Changed -= OnBufferChanged;
             _document.FileActionOccurred -= OnFileActionOccurred;
             _view.Closed -= OnClosed;
-            _cts?.Cancel();
+            _prefetchCts?.Cancel();
+            _lineCts?.Cancel();
         }
 
         private void ScheduleBlame()
@@ -157,8 +200,8 @@ namespace GitForTfs.Editor
                 return;
             }
 
-            _cts?.Cancel();
-            var cts = _cts = new CancellationTokenSource();
+            _lineCts?.Cancel();
+            var cts = _lineCts = new CancellationTokenSource();
             var token = cts.Token;
 
             ThreadHelper.JoinableTaskFactory.RunAsync(async () =>

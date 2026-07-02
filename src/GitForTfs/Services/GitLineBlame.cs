@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -74,6 +75,26 @@ namespace GitForTfs.Services
             return Parse(output);
         }
 
+        /// <summary>
+        /// Blames the whole file in a single git call and returns every line's blame keyed by
+        /// 1-based line number. Used to pre-fill the adornment's cache so the first visit to any
+        /// line is instant. One heavier call up front instead of one small call per line.
+        /// </summary>
+        public static async Task<Dictionary<int, LineBlame>> GetFileBlameAsync(string filePath, CancellationToken cancellationToken)
+        {
+            var dir = SafeGetDirectory(filePath);
+            if (dir == null)
+                return null;
+
+            var args = string.Format(CultureInfo.InvariantCulture, "--no-pager blame --porcelain -- \"{0}\"", filePath);
+
+            var output = await RunGitAsync(args, dir, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(output))
+                return null;
+
+            return ParseFile(output);
+        }
+
         // ------------------------------------------------------------------
 
         private static LineBlame Parse(string porcelain)
@@ -112,11 +133,99 @@ namespace GitForTfs.Services
                 }
             }
 
-            if (string.IsNullOrEmpty(hash))
-                return null;
+            return string.IsNullOrEmpty(hash) ? null : BuildBlame(hash, author, time, summary);
+        }
 
+        /// <summary>
+        /// Parses whole-file <c>git blame --porcelain</c> output into a per-line map. The
+        /// extended commit headers (author/time/summary) appear only the first time a commit is
+        /// seen, so they are remembered per SHA and reused for that commit's other lines.
+        /// </summary>
+        private static Dictionary<int, LineBlame> ParseFile(string porcelain)
+        {
+            var meta = new Dictionary<string, CommitMeta>(StringComparer.OrdinalIgnoreCase);
+            var byLine = new Dictionary<int, LineBlame>();
+            string currentSha = null;
+            var currentLine = 0;
+
+            using (var reader = new StringReader(porcelain))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (line.Length == 0)
+                        continue;
+
+                    if (line[0] == '\t')
+                    {
+                        // The actual source line; attribute it to the current commit.
+                        if (currentSha != null && currentLine > 0)
+                        {
+                            meta.TryGetValue(currentSha, out var m);
+                            byLine[currentLine] = BuildBlame(currentSha, m.Author, m.Time, m.Summary);
+                        }
+                        continue;
+                    }
+
+                    var space = line.IndexOf(' ');
+                    var key = space < 0 ? line : line.Substring(0, space);
+
+                    if (IsHash(key))
+                    {
+                        // Header: "<sha> <origLine> <finalLine> [<count>]".
+                        currentSha = key;
+                        var parts = line.Split(' ');
+                        if (parts.Length >= 3 && int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var finalLine))
+                            currentLine = finalLine;
+                        if (!meta.ContainsKey(currentSha))
+                            meta[currentSha] = new CommitMeta();
+                        continue;
+                    }
+
+                    if (currentSha == null)
+                        continue;
+
+                    var value = space < 0 ? string.Empty : line.Substring(space + 1);
+                    var entry = meta[currentSha];
+                    switch (key)
+                    {
+                        case "author": entry.Author = value; break;
+                        case "committer-time":
+                            long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var t);
+                            entry.Time = t;
+                            break;
+                        case "summary": entry.Summary = value; break;
+                    }
+                    meta[currentSha] = entry;
+                }
+            }
+
+            return byLine.Count == 0 ? null : byLine;
+        }
+
+        private struct CommitMeta
+        {
+            public string Author;
+            public long Time;
+            public string Summary;
+        }
+
+        private static bool IsHash(string token)
+        {
+            if (token.Length != 40)
+                return false;
+            foreach (var c in token)
+            {
+                var hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!hex)
+                    return false;
+            }
+            return true;
+        }
+
+        private static LineBlame BuildBlame(string hash, string author, long time, string summary)
+        {
             var uncommitted = hash.Replace("0", string.Empty).Length == 0;
-
             return new LineBlame
             {
                 Author = uncommitted ? "You" : (author ?? "Unknown"),
