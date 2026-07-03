@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
@@ -31,6 +32,7 @@ namespace GitForTfs.ViewModels
         private int _selectedTabIndex;
         private bool _isBusy;
         private bool _hasRepository;
+        private string _changesSignature; // fingerprint of the last-applied change set, for auto-refresh
 
         public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Func<DiffRequest, Task> openDiff, Func<string, Task> openDocument, Action<string> log)
         {
@@ -281,16 +283,8 @@ namespace GitForTfs.ViewModels
                 CurrentBranch = await _git.GetCurrentBranchAsync().ConfigureAwait(true) ?? "(unknown)";
 
                 var changes = await _git.GetStatusAsync().ConfigureAwait(true);
-                StagedChanges.Clear();
-                UnstagedChanges.Clear();
-                foreach (var change in changes)
-                {
-                    var vm = new ChangeItemViewModel(change);
-                    if (change.Stage == GitChangeStage.Staged)
-                        StagedChanges.Add(vm);
-                    else
-                        UnstagedChanges.Add(vm);
-                }
+                ApplyChanges(changes);
+                _changesSignature = ComputeSignature(changes);
 
                 var branches = await _git.GetBranchesAsync().ConfigureAwait(true);
                 Branches.Clear();
@@ -309,6 +303,67 @@ namespace GitForTfs.ViewModels
             {
                 IsBusy = false;
             }
+        }
+
+        /// <summary>
+        /// Lightweight poll used by the tool window's auto-refresh timer: re-reads only the
+        /// working-tree status (and current branch) and rebuilds the change lists <b>only</b>
+        /// when they actually differ, so an idle repository causes no UI churn and no flicker.
+        /// </summary>
+        public async Task AutoRefreshChangesAsync()
+        {
+            if (!_git.HasWorkingDirectory || IsBusy)
+                return;
+
+            string branch;
+            IReadOnlyList<GitChange> changes;
+            try
+            {
+                branch = await _git.GetCurrentBranchAsync().ConfigureAwait(true) ?? "(unknown)";
+                changes = await _git.GetStatusAsync().ConfigureAwait(true);
+            }
+            catch
+            {
+                return; // transient git error — try again on the next tick
+            }
+
+            if (IsBusy) // a user operation started while we were awaiting; let it own the state
+                return;
+
+            if (!string.Equals(branch, CurrentBranch, StringComparison.Ordinal))
+                CurrentBranch = branch;
+
+            var signature = ComputeSignature(changes);
+            if (signature == _changesSignature)
+                return; // nothing changed — leave the UI untouched
+
+            _changesSignature = signature;
+            ApplyChanges(changes);
+            RaisePropertyChanged(nameof(CanCommit));
+            StatusMessage = $"{StagedChanges.Count} staged, {UnstagedChanges.Count} unstaged — on {CurrentBranch}";
+        }
+
+        private void ApplyChanges(IReadOnlyList<GitChange> changes)
+        {
+            StagedChanges.Clear();
+            UnstagedChanges.Clear();
+            foreach (var change in changes)
+            {
+                var vm = new ChangeItemViewModel(change);
+                if (change.Stage == GitChangeStage.Staged)
+                    StagedChanges.Add(vm);
+                else
+                    UnstagedChanges.Add(vm);
+            }
+        }
+
+        private static string ComputeSignature(IReadOnlyList<GitChange> changes)
+        {
+            var sb = new StringBuilder();
+            foreach (var c in changes)
+                sb.Append(c.Stage).Append('|').Append(c.StatusCode).Append('|')
+                  .Append(c.Path).Append('|').Append(c.OriginalPath).Append('\n');
+            return sb.ToString();
         }
 
         // -----------------------------------------------------------------

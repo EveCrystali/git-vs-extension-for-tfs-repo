@@ -265,7 +265,8 @@ namespace GitForTfs.Editor
             if (_view.FormattedLineSource != null)
             {
                 label.FontFamily = _view.FormattedLineSource.DefaultTextProperties.Typeface.FontFamily;
-                label.FontSize = _view.FormattedLineSource.DefaultTextProperties.FontRenderingEmSize;
+                // ~15% smaller than the editor font so the annotation stays discreet.
+                label.FontSize = _view.FormattedLineSource.DefaultTextProperties.FontRenderingEmSize * 0.85;
             }
 
             label.MouseLeftButtonDown += (s, e) =>
@@ -274,7 +275,8 @@ namespace GitForTfs.Editor
                 GitForTfsPackage.ShowFileHistory(_filePath);
             };
 
-            Canvas.SetLeft(label, viewLine.TextRight + 12);
+            // Push the annotation further past the end of the code so it does not crowd the text.
+            Canvas.SetLeft(label, viewLine.TextRight + 40);
             Canvas.SetTop(label, viewLine.TextTop);
 
             _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, viewLine.Extent, null, label, null);

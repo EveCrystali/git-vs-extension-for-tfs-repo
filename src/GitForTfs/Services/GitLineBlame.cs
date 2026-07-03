@@ -19,11 +19,31 @@ namespace GitForTfs.Services
         public string RelativeDate { get; set; }
         public bool IsUncommitted { get; set; }
 
-        /// <summary>The one-line label shown at the end of the current editor line.</summary>
+        /// <summary>The author's initials, e.g. "Antoine Javelle" → "AJ", "Test" → "T".</summary>
+        public string AuthorInitials
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(Author))
+                    return "?";
+
+                var parts = Author.Split(new[] { ' ', '.', '-', '_', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0)
+                    return "?";
+                if (parts.Length == 1)
+                    return char.ToUpperInvariant(parts[0][0]).ToString();
+
+                return string.Concat(
+                    char.ToUpperInvariant(parts[0][0]),
+                    char.ToUpperInvariant(parts[parts.Length - 1][0]));
+            }
+        }
+
+        /// <summary>The one-line label shown at the end of the current editor line (initials).</summary>
         public string InlineText =>
             string.IsNullOrEmpty(Summary)
-                ? $"{Author}, {RelativeDate}"
-                : $"{Author}, {RelativeDate} • {Summary}";
+                ? $"{AuthorInitials}, {RelativeDate}"
+                : $"{AuthorInitials}, {RelativeDate} • {Summary}";
     }
 
     /// <summary>
