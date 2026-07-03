@@ -354,6 +354,10 @@ namespace GitForTfs.Services
         public Task<GitResult> GetDiffAsync(string path, bool staged, CancellationToken cancellationToken = default) =>
             RunAsync($"diff {(staged ? "--staged " : string.Empty)}-- \"{path}\"", cancellationToken: cancellationToken);
 
+        /// <summary>Returns the full staged (cached) diff — everything that would go into a commit.</summary>
+        public Task<GitResult> GetCachedDiffAsync(CancellationToken cancellationToken = default) =>
+            RunAsync("diff --cached", cancellationToken: cancellationToken);
+
         // ---------------------------------------------------------------------
         // Blob content (for the side-by-side diff viewer)
         // ---------------------------------------------------------------------

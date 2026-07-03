@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using EnvDTE;
 using GitForTfs.Services;
 using GitForTfs.ViewModels;
@@ -18,20 +19,30 @@ namespace GitForTfs.ToolWindows
     {
         private readonly GitToolWindowViewModel _viewModel;
         private bool _initialized;
+        private DispatcherTimer _autoRefreshTimer;
 
         public GitToolWindowControl()
         {
             InitializeComponent();
 
             var logger = new OutputLogger(ServiceProvider.GlobalProvider);
-            _viewModel = new GitToolWindowViewModel(GetSolutionDirectoryAsync, OpenDiffAsync, logger.Log);
+            _viewModel = new GitToolWindowViewModel(GetSolutionDirectoryAsync, OpenDiffAsync, OpenDocumentAsync, logger.Log);
             DataContext = _viewModel;
 
             Loaded += OnLoaded;
+            Unloaded += OnUnloaded;
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
+            // Poll git periodically so the Changes lists reflect edits made outside the window.
+            if (_autoRefreshTimer == null)
+            {
+                _autoRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+                _autoRefreshTimer.Tick += OnAutoRefreshTick;
+            }
+            _autoRefreshTimer.Start();
+
             if (_initialized)
                 return;
 
@@ -40,6 +51,20 @@ namespace GitForTfs.ToolWindows
             {
                 await _viewModel.InitializeAsync();
             }).FileAndForget("gitfortfs/initialize");
+        }
+
+        private void OnUnloaded(object sender, RoutedEventArgs e) => _autoRefreshTimer?.Stop();
+
+        private void OnAutoRefreshTick(object sender, EventArgs e)
+        {
+            // Skip while the tool window tab is hidden — no point spawning git then.
+            if (!IsVisible)
+                return;
+
+            ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await _viewModel.AutoRefreshChangesAsync();
+            }).FileAndForget("gitfortfs/auto-refresh");
         }
 
         private void OnChangeItemDoubleClick(object sender, MouseButtonEventArgs e)
@@ -95,6 +120,15 @@ namespace GitForTfs.ToolWindows
                 null,
                 null,
                 options);
+        }
+
+        /// <summary>Opens a file (e.g. the generated staged-diff scratch file) in a VS editor tab.</summary>
+        private async Task OpenDocumentAsync(string filePath)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            if (Package.GetGlobalService(typeof(DTE)) is DTE dte)
+                dte.ItemOperations.OpenFile(filePath, EnvDTE.Constants.vsViewKindTextView);
         }
 
         /// <summary>

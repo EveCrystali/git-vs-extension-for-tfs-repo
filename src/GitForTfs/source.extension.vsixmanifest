@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+<<<<<<< HEAD
     <Metadata>
         <Identity Id="GitForTfs.b7f6d2a4-3c81-4e57-9a0b-1f2e3d4c5b60" Version="1.1.0" Language="en-US" Publisher="Antoine Javelle" />
         <DisplayName>Git for TFS</DisplayName>
@@ -22,6 +23,30 @@
     <Assets>
         <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
         <!-- The main assembly also carries in-proc editor MEF parts (the current-line git blame
+=======
+  <Metadata>
+    <Identity Id="GitForTfs.b7f6d2a4-3c81-4e57-9a0b-1f2e3d4c5b60" Version="1.2.0" Language="en-US" Publisher="Antoine Javelle" />
+    <DisplayName>Git for TFS</DisplayName>
+    <Description xml:space="preserve">A standalone Git tool window for Visual Studio 2022. It lets you stage, commit, branch, fetch, pull and push with plain git, even when the built-in Git tooling is disabled because the solution lives inside a TFVC (TFS) workspace.</Description>
+    <MoreInfo>https://github.com/EveCrystali/git-vs-extension-for-tfs-repo</MoreInfo>
+    <Tags>git;tfvc;tfs;source control;version control;tool window</Tags>
+  </Metadata>
+  <Installation>
+    <!-- 17.x = Visual Studio 2022, 18.x = Visual Studio 2026. Range covers both. -->
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,19.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,19.0)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" d:Source="Manual" Version="[4.7.2,)" />
+  </Dependencies>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+    <!-- The main assembly also carries in-proc editor MEF parts (the current-line git blame
+>>>>>>> 1508e9dca04777e806f48e71d99b405c02489289
          adornment), so it must be registered as a MefComponent, not only a VsPackage. -->
         <Asset Type="Microsoft.VisualStudio.MefComponent" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%|" />
         <Asset Type="Microsoft.VisualStudio.MefComponent" d:Source="Project" d:ProjectName="GitForTfs.CodeLens" Path="|GitForTfs.CodeLens|" />

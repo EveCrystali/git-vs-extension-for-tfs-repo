@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
@@ -18,6 +19,7 @@ namespace GitForTfs.ViewModels
         private readonly GitCliService _git;
         private readonly Func<Task<string>> _solutionDirectoryProvider;
         private readonly Func<DiffRequest, Task> _openDiff;
+        private readonly Func<string, Task> _openDocument;
         private readonly Action<string> _log;
 
         private string _repositoryPath;
@@ -30,11 +32,13 @@ namespace GitForTfs.ViewModels
         private int _selectedTabIndex;
         private bool _isBusy;
         private bool _hasRepository;
+        private string _changesSignature; // fingerprint of the last-applied change set, for auto-refresh
 
-        public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Func<DiffRequest, Task> openDiff, Action<string> log)
+        public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Func<DiffRequest, Task> openDiff, Func<string, Task> openDocument, Action<string> log)
         {
             _solutionDirectoryProvider = solutionDirectoryProvider;
             _openDiff = openDiff;
+            _openDocument = openDocument;
             _log = log;
             _git = new GitCliService(log);
 
@@ -67,6 +71,7 @@ namespace GitForTfs.ViewModels
             OpenDiffCommand = new AsyncRelayCommand(p => OpenDiffAsync(p as ChangeItemViewModel), _ => HasRepository && !IsBusy);
             ShowFileHistoryCommand = new AsyncRelayCommand(p => ShowFileHistoryAsync(p as ChangeItemViewModel), _ => HasRepository && !IsBusy);
             OpenCommitDiffCommand = new AsyncRelayCommand(p => OpenCommitDiffAsync(p as CommitItemViewModel), _ => HasRepository && !IsBusy);
+            GenerateCommitDiffCommand = new AsyncRelayCommand(_ => GenerateCommitDiffAsync(), _ => HasRepository && !IsBusy);
         }
 
         // -----------------------------------------------------------------
@@ -171,6 +176,7 @@ namespace GitForTfs.ViewModels
         public ICommand OpenDiffCommand { get; }
         public ICommand ShowFileHistoryCommand { get; }
         public ICommand OpenCommitDiffCommand { get; }
+        public ICommand GenerateCommitDiffCommand { get; }
 
         // -----------------------------------------------------------------
         // Lifecycle
@@ -277,16 +283,8 @@ namespace GitForTfs.ViewModels
                 CurrentBranch = await _git.GetCurrentBranchAsync().ConfigureAwait(true) ?? "(unknown)";
 
                 var changes = await _git.GetStatusAsync().ConfigureAwait(true);
-                StagedChanges.Clear();
-                UnstagedChanges.Clear();
-                foreach (var change in changes)
-                {
-                    var vm = new ChangeItemViewModel(change);
-                    if (change.Stage == GitChangeStage.Staged)
-                        StagedChanges.Add(vm);
-                    else
-                        UnstagedChanges.Add(vm);
-                }
+                ApplyChanges(changes);
+                _changesSignature = ComputeSignature(changes);
 
                 var branches = await _git.GetBranchesAsync().ConfigureAwait(true);
                 Branches.Clear();
@@ -305,6 +303,67 @@ namespace GitForTfs.ViewModels
             {
                 IsBusy = false;
             }
+        }
+
+        /// <summary>
+        /// Lightweight poll used by the tool window's auto-refresh timer: re-reads only the
+        /// working-tree status (and current branch) and rebuilds the change lists <b>only</b>
+        /// when they actually differ, so an idle repository causes no UI churn and no flicker.
+        /// </summary>
+        public async Task AutoRefreshChangesAsync()
+        {
+            if (!_git.HasWorkingDirectory || IsBusy)
+                return;
+
+            string branch;
+            IReadOnlyList<GitChange> changes;
+            try
+            {
+                branch = await _git.GetCurrentBranchAsync().ConfigureAwait(true) ?? "(unknown)";
+                changes = await _git.GetStatusAsync().ConfigureAwait(true);
+            }
+            catch
+            {
+                return; // transient git error — try again on the next tick
+            }
+
+            if (IsBusy) // a user operation started while we were awaiting; let it own the state
+                return;
+
+            if (!string.Equals(branch, CurrentBranch, StringComparison.Ordinal))
+                CurrentBranch = branch;
+
+            var signature = ComputeSignature(changes);
+            if (signature == _changesSignature)
+                return; // nothing changed — leave the UI untouched
+
+            _changesSignature = signature;
+            ApplyChanges(changes);
+            RaisePropertyChanged(nameof(CanCommit));
+            StatusMessage = $"{StagedChanges.Count} staged, {UnstagedChanges.Count} unstaged — on {CurrentBranch}";
+        }
+
+        private void ApplyChanges(IReadOnlyList<GitChange> changes)
+        {
+            StagedChanges.Clear();
+            UnstagedChanges.Clear();
+            foreach (var change in changes)
+            {
+                var vm = new ChangeItemViewModel(change);
+                if (change.Stage == GitChangeStage.Staged)
+                    StagedChanges.Add(vm);
+                else
+                    UnstagedChanges.Add(vm);
+            }
+        }
+
+        private static string ComputeSignature(IReadOnlyList<GitChange> changes)
+        {
+            var sb = new StringBuilder();
+            foreach (var c in changes)
+                sb.Append(c.Stage).Append('|').Append(c.StatusCode).Append('|')
+                  .Append(c.Path).Append('|').Append(c.OriginalPath).Append('\n');
+            return sb.ToString();
         }
 
         // -----------------------------------------------------------------
@@ -485,6 +544,50 @@ namespace GitForTfs.ViewModels
             catch (Exception ex)
             {
                 StatusMessage = "Could not open diff: " + ex.Message;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        /// <summary>
+        /// Writes the full staged diff (<c>git diff --cached</c>) to a temp file and opens it in
+        /// the editor — handy for pasting into an AI to draft a commit message.
+        /// </summary>
+        private async Task GenerateCommitDiffAsync()
+        {
+            if (_openDocument == null)
+                return;
+
+            IsBusy = true;
+            try
+            {
+                var result = await _git.GetCachedDiffAsync().ConfigureAwait(true);
+                if (!result.Success)
+                {
+                    StatusMessage = "Could not read the staged diff — see the Git output window.";
+                    return;
+                }
+
+                var diff = result.StandardOutput;
+                if (string.IsNullOrWhiteSpace(diff))
+                {
+                    StatusMessage = "Nothing staged — stage changes first, then generate the diff.";
+                    return;
+                }
+
+                var dir = Path.Combine(Path.GetTempPath(), "GitForTfs");
+                Directory.CreateDirectory(dir);
+                var file = Path.Combine(dir, "staged-diff.diff");
+                File.WriteAllText(file, diff, new UTF8Encoding(false));
+
+                await _openDocument(file).ConfigureAwait(true);
+                StatusMessage = "Opened the staged diff — paste it to your AI for a commit message.";
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = "Could not generate the staged diff: " + ex.Message;
             }
             finally
             {
