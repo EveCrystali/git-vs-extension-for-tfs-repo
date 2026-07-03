@@ -3,8 +3,8 @@ using System;
 namespace GitForTfs
 {
     /// <summary>
-    /// GUIDs shared between the C# package and the <c>GitForTfsPackage.vsct</c> command table.
-    /// The string values MUST stay in sync with the &lt;Symbols&gt; section of the .vsct file.
+    /// GUIDs shared between the C# package and the <c>GitForTfsPackage.vsct</c> command table. The string values MUST
+    /// stay in sync with the &lt;Symbols&gt; section of the .vsct file.
     /// </summary>
     internal static class PackageGuids
     {
