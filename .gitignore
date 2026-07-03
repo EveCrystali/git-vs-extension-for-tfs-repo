@@ -23,3 +23,6 @@ _ReSharper*/
 # OS
 Thumbs.db
 .DS_Store
+
+# VS retargeting logs
+UpgradeLog*.htm

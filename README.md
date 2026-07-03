@@ -41,6 +41,39 @@ le tout sans quitter Visual Studio.
 - Toutes les commandes git exécutées sont tracées dans une sortie dédiée
   **Affichage → Sortie → « Git for TFS »**.
 
+### Vue Diff (comparateur intégré de Visual Studio)
+
+Double-clic (ou bouton **Diff**) sur un fichier modifié ouvre le **comparateur côte à côte
+natif de Visual Studio** (`IVsDifferenceService`) :
+
+- fichier *unstaged* → **index vs copie de travail**,
+- fichier *staged* → **HEAD vs index**,
+- fichier non suivi → **vide vs nouveau fichier**.
+
+Les versions « avant » sont extraites via `git show` dans des fichiers temporaires ; la copie
+de travail réelle n'est jamais marquée comme temporaire (donc jamais supprimée par VS).
+
+### Historique par fichier
+
+- Bouton **Hist** sur un fichier de la liste des changements.
+- **Clic droit dans l'Explorateur de solutions → « Git for TFS: File History »** pour
+  n'importe quel fichier du projet, même non modifié.
+
+L'onglet **File History** liste alors les commits ayant touché le fichier (`git log --follow`).
+Double-clic (ou bouton **Diff**) sur un commit ouvre le diff de ce fichier **à ce commit**
+(`<hash>~1` vs `<hash>`).
+
+### CodeLens git (auteur du dernier changement)
+
+Un indicateur **CodeLens** apparaît au-dessus de chaque méthode / propriété / type et affiche
+**l'auteur et la date du dernier commit** qui a modifié l'élément — l'équivalent du CodeLens
+Git intégré, indisponible quand TFVC est le fournisseur actif.
+
+Détails d'implémentation (voir *Notes CodeLens* plus bas) : le fournisseur
+(`IAsyncCodeLensDataPointProvider`) vit dans un **assembly séparé** (`GitForTfs.CodeLens`),
+chargé par l'**hôte CodeLens hors-processus**. Il n'a donc aucune dépendance au shell VS et
+interroge `git blame` directement sur la plage de lignes de l'élément.
+
 ## Prérequis
 
 - Visual Studio 2022 (17.x), charge de travail **Visual Studio extension development**
@@ -81,17 +114,39 @@ Double-cliquer sur `GitForTfs.vsix` (VS fermé), ou passer par
 ## Structure du code
 
 ```
-src/GitForTfs/
-├── GitForTfsPackage.cs          Point d'entrée (AsyncPackage) — PAS un fournisseur SCC
-├── GitForTfsPackage.vsct        Table de commandes (entrée du menu Affichage)
-├── PackageIds.cs                GUID/IDs partagés code <-> vsct
-├── Commands/                    Commande d'ouverture de la fenêtre d'outil
-├── ToolWindows/                 Fenêtre d'outil + vue WPF (XAML)
-├── ViewModels/                  MVVM : orchestration et éléments de liste
-├── Mvvm/                        Base INotifyPropertyChanged, commandes, convertisseurs
-└── Services/                    Wrapper git CLI, modèles, persistance, log
+src/
+├── GitForTfs/                   VSIX principal (fenêtre d'outil, commandes)
+│   ├── GitForTfsPackage.cs      Point d'entrée (AsyncPackage) — PAS un fournisseur SCC
+│   ├── GitForTfsPackage.vsct    Table de commandes (menu Affichage + Explorateur de solutions)
+│   ├── PackageIds.cs            GUID/IDs partagés code <-> vsct
+│   ├── Commands/                Ouverture de la fenêtre + « File History » (Explorateur)
+│   ├── ToolWindows/             Fenêtre d'outil + vue WPF (XAML) + intégration diff
+│   ├── ViewModels/              MVVM : orchestration, diff, historique, éléments de liste
+│   ├── Mvvm/                    Base INotifyPropertyChanged, commandes, convertisseurs
+│   └── Services/                Wrapper git CLI, modèles, persistance, log
+└── GitForTfs.CodeLens/          Assembly du fournisseur CodeLens (hors-processus)
+    ├── GitBlameCodeLensProvider.cs   Provider MEF + data point
+    └── GitBlameReader.cs             git blame autonome (aucune dépendance shell)
 ```
 
 Le pilotage de git se fait dans `Services/GitCliService.cs`, qui lance `git.exe` de façon
 asynchrone (sans jamais bloquer le thread UI) et parse la sortie *porcelain*.
+
+## Notes CodeLens
+
+Le CodeLens de Visual Studio s'exécute dans un **processus hôte séparé** (ServiceHub). Le
+fournisseur doit donc être un composant MEF autonome, sans référence au shell VS — d'où le
+projet distinct `GitForTfs.CodeLens`, inclus dans le VSIX comme
+`Microsoft.VisualStudio.MefComponent` (voir `source.extension.vsixmanifest`) et **non**
+référencé en sortie par le package principal.
+
+Limites connues :
+
+- La correspondance plage de caractères → numéros de ligne lit le fichier **sur le disque** ;
+  des modifications non enregistrées peuvent décaler légèrement le blame tant que le fichier
+  n'est pas sauvegardé.
+- Le blame est calculé sur la plage de l'élément (`git blame -L`), donc l'indicateur reflète
+  le **dernier commit** ayant touché ces lignes (pas un historique complet inline).
+- `git` doit être dans le `PATH` du processus hôte CodeLens (généralement le même `PATH`
+  système que Visual Studio).
 ```

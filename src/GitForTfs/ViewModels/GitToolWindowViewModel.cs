@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using GitForTfs.Mvvm;
@@ -15,6 +18,8 @@ namespace GitForTfs.ViewModels
     {
         private readonly GitCliService _git;
         private readonly Func<Task<string>> _solutionDirectoryProvider;
+        private readonly Func<DiffRequest, Task> _openDiff;
+        private readonly Func<string, Task> _openDocument;
         private readonly Action<string> _log;
 
         private string _repositoryPath;
@@ -22,12 +27,18 @@ namespace GitForTfs.ViewModels
         private string _commitMessage;
         private string _newBranchName;
         private string _statusMessage;
+        private string _fileHistoryTitle;
+        private string _historyFileRelativePath;
+        private int _selectedTabIndex;
         private bool _isBusy;
         private bool _hasRepository;
+        private string _changesSignature; // fingerprint of the last-applied change set, for auto-refresh
 
-        public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Action<string> log)
+        public GitToolWindowViewModel(Func<Task<string>> solutionDirectoryProvider, Func<DiffRequest, Task> openDiff, Func<string, Task> openDocument, Action<string> log)
         {
             _solutionDirectoryProvider = solutionDirectoryProvider;
+            _openDiff = openDiff;
+            _openDocument = openDocument;
             _log = log;
             _git = new GitCliService(log);
 
@@ -35,6 +46,7 @@ namespace GitForTfs.ViewModels
             UnstagedChanges = new ObservableCollection<ChangeItemViewModel>();
             Branches = new ObservableCollection<BranchItemViewModel>();
             Commits = new ObservableCollection<CommitItemViewModel>();
+            FileHistoryCommits = new ObservableCollection<CommitItemViewModel>();
 
             RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => HasRepository && !IsBusy);
             AutoDetectCommand = new AsyncRelayCommand(_ => AutoDetectRepositoryAsync(), _ => !IsBusy);
@@ -55,6 +67,11 @@ namespace GitForTfs.ViewModels
 
             CreateBranchCommand = new AsyncRelayCommand(_ => CreateBranchAsync(), _ => HasRepository && !IsBusy && !string.IsNullOrWhiteSpace(NewBranchName));
             CheckoutCommand = new AsyncRelayCommand(p => CheckoutAsync(p as BranchItemViewModel), _ => HasRepository && !IsBusy);
+
+            OpenDiffCommand = new AsyncRelayCommand(p => OpenDiffAsync(p as ChangeItemViewModel), _ => HasRepository && !IsBusy);
+            ShowFileHistoryCommand = new AsyncRelayCommand(p => ShowFileHistoryAsync(p as ChangeItemViewModel), _ => HasRepository && !IsBusy);
+            OpenCommitDiffCommand = new AsyncRelayCommand(p => OpenCommitDiffAsync(p as CommitItemViewModel), _ => HasRepository && !IsBusy);
+            GenerateCommitDiffCommand = new AsyncRelayCommand(_ => GenerateCommitDiffAsync(), _ => HasRepository && !IsBusy);
         }
 
         // -----------------------------------------------------------------
@@ -65,6 +82,7 @@ namespace GitForTfs.ViewModels
         public ObservableCollection<ChangeItemViewModel> UnstagedChanges { get; }
         public ObservableCollection<BranchItemViewModel> Branches { get; }
         public ObservableCollection<CommitItemViewModel> Commits { get; }
+        public ObservableCollection<CommitItemViewModel> FileHistoryCommits { get; }
 
         // -----------------------------------------------------------------
         // Bindable state
@@ -121,6 +139,21 @@ namespace GitForTfs.ViewModels
         public bool CanCommit =>
             HasRepository && !IsBusy && StagedChanges.Count > 0 && !string.IsNullOrWhiteSpace(CommitMessage);
 
+        public string FileHistoryTitle
+        {
+            get => _fileHistoryTitle;
+            set => SetProperty(ref _fileHistoryTitle, value);
+        }
+
+        public bool HasFileHistory => FileHistoryCommits.Count > 0;
+
+        /// <summary>Bound to the tab control so code can bring a tab to the front programmatically.</summary>
+        public int SelectedTabIndex
+        {
+            get => _selectedTabIndex;
+            set => SetProperty(ref _selectedTabIndex, value);
+        }
+
         // -----------------------------------------------------------------
         // Commands
         // -----------------------------------------------------------------
@@ -140,6 +173,10 @@ namespace GitForTfs.ViewModels
         public ICommand PushCommand { get; }
         public ICommand CreateBranchCommand { get; }
         public ICommand CheckoutCommand { get; }
+        public ICommand OpenDiffCommand { get; }
+        public ICommand ShowFileHistoryCommand { get; }
+        public ICommand OpenCommitDiffCommand { get; }
+        public ICommand GenerateCommitDiffCommand { get; }
 
         // -----------------------------------------------------------------
         // Lifecycle
@@ -246,16 +283,8 @@ namespace GitForTfs.ViewModels
                 CurrentBranch = await _git.GetCurrentBranchAsync().ConfigureAwait(true) ?? "(unknown)";
 
                 var changes = await _git.GetStatusAsync().ConfigureAwait(true);
-                StagedChanges.Clear();
-                UnstagedChanges.Clear();
-                foreach (var change in changes)
-                {
-                    var vm = new ChangeItemViewModel(change);
-                    if (change.Stage == GitChangeStage.Staged)
-                        StagedChanges.Add(vm);
-                    else
-                        UnstagedChanges.Add(vm);
-                }
+                ApplyChanges(changes);
+                _changesSignature = ComputeSignature(changes);
 
                 var branches = await _git.GetBranchesAsync().ConfigureAwait(true);
                 Branches.Clear();
@@ -274,6 +303,67 @@ namespace GitForTfs.ViewModels
             {
                 IsBusy = false;
             }
+        }
+
+        /// <summary>
+        /// Lightweight poll used by the tool window's auto-refresh timer: re-reads only the
+        /// working-tree status (and current branch) and rebuilds the change lists <b>only</b>
+        /// when they actually differ, so an idle repository causes no UI churn and no flicker.
+        /// </summary>
+        public async Task AutoRefreshChangesAsync()
+        {
+            if (!_git.HasWorkingDirectory || IsBusy)
+                return;
+
+            string branch;
+            IReadOnlyList<GitChange> changes;
+            try
+            {
+                branch = await _git.GetCurrentBranchAsync().ConfigureAwait(true) ?? "(unknown)";
+                changes = await _git.GetStatusAsync().ConfigureAwait(true);
+            }
+            catch
+            {
+                return; // transient git error — try again on the next tick
+            }
+
+            if (IsBusy) // a user operation started while we were awaiting; let it own the state
+                return;
+
+            if (!string.Equals(branch, CurrentBranch, StringComparison.Ordinal))
+                CurrentBranch = branch;
+
+            var signature = ComputeSignature(changes);
+            if (signature == _changesSignature)
+                return; // nothing changed — leave the UI untouched
+
+            _changesSignature = signature;
+            ApplyChanges(changes);
+            RaisePropertyChanged(nameof(CanCommit));
+            StatusMessage = $"{StagedChanges.Count} staged, {UnstagedChanges.Count} unstaged — on {CurrentBranch}";
+        }
+
+        private void ApplyChanges(IReadOnlyList<GitChange> changes)
+        {
+            StagedChanges.Clear();
+            UnstagedChanges.Clear();
+            foreach (var change in changes)
+            {
+                var vm = new ChangeItemViewModel(change);
+                if (change.Stage == GitChangeStage.Staged)
+                    StagedChanges.Add(vm);
+                else
+                    UnstagedChanges.Add(vm);
+            }
+        }
+
+        private static string ComputeSignature(IReadOnlyList<GitChange> changes)
+        {
+            var sb = new StringBuilder();
+            foreach (var c in changes)
+                sb.Append(c.Stage).Append('|').Append(c.StatusCode).Append('|')
+                  .Append(c.Path).Append('|').Append(c.OriginalPath).Append('\n');
+            return sb.ToString();
         }
 
         // -----------------------------------------------------------------
@@ -365,6 +455,231 @@ namespace GitForTfs.ViewModels
             item == null || item.IsCurrent
                 ? Task.CompletedTask
                 : RunAndRefreshAsync($"Checkout {item.Name}", () => _git.CheckoutAsync(item.Name));
+
+        // -----------------------------------------------------------------
+        // Diff viewer
+        // -----------------------------------------------------------------
+
+        private async Task OpenDiffAsync(ChangeItemViewModel item)
+        {
+            if (item == null || _openDiff == null)
+                return;
+
+            IsBusy = true;
+            try
+            {
+                var relPath = item.Path;
+                var oldRelPath = item.Change.OriginalPath ?? relPath;
+                string leftFile, rightFile, leftLabel, rightLabel;
+                bool rightIsTemporary;
+
+                if (item.Change.Stage == GitChangeStage.Untracked)
+                {
+                    // Nothing to compare against yet: empty vs the new file.
+                    leftFile = await WriteTempBlobAsync(string.Empty, relPath, "empty").ConfigureAwait(true);
+                    rightFile = GetWorkingFilePath(relPath);
+                    rightIsTemporary = false; // real working-tree file — must NOT be deleted
+                    leftLabel = "(new file)";
+                    rightLabel = relPath + " (working tree)";
+                }
+                else if (item.Change.Stage == GitChangeStage.Staged)
+                {
+                    // Staged: HEAD vs index.
+                    leftFile = await WriteTempBlobAsync("HEAD:" + oldRelPath, relPath, "HEAD").ConfigureAwait(true);
+                    rightFile = await WriteTempBlobAsync(":" + relPath, relPath, "index").ConfigureAwait(true);
+                    rightIsTemporary = true;
+                    leftLabel = relPath + " (HEAD)";
+                    rightLabel = relPath + " (staged)";
+                }
+                else
+                {
+                    // Unstaged: index vs working tree.
+                    var isDeleted = item.Change.StatusCode == 'D';
+                    leftFile = await WriteTempBlobAsync(":" + oldRelPath, relPath, "index").ConfigureAwait(true);
+                    rightFile = isDeleted
+                        ? await WriteTempBlobAsync(string.Empty, relPath, "deleted").ConfigureAwait(true)
+                        : GetWorkingFilePath(relPath);
+                    rightIsTemporary = isDeleted; // only the empty placeholder is temporary
+                    leftLabel = relPath + " (index)";
+                    rightLabel = isDeleted ? "(deleted)" : relPath + " (working tree)";
+                }
+
+                await _openDiff(new DiffRequest(leftFile, rightFile, "Diff: " + item.FileName, leftLabel, rightLabel,
+                    leftIsTemporary: true, rightIsTemporary: rightIsTemporary)).ConfigureAwait(true);
+                StatusMessage = "Opened diff for " + item.FileName;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = "Could not open diff: " + ex.Message;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        private async Task OpenCommitDiffAsync(CommitItemViewModel commit)
+        {
+            if (commit == null || _openDiff == null || string.IsNullOrEmpty(_historyFileRelativePath))
+                return;
+
+            IsBusy = true;
+            try
+            {
+                var relPath = _historyFileRelativePath;
+                var fileName = Path.GetFileName(relPath);
+                var hash = commit.Commit.FullHash;
+
+                var leftFile = await WriteTempBlobAsync($"{hash}~1:{relPath}", relPath, commit.ShortHash + "~1").ConfigureAwait(true);
+                var rightFile = await WriteTempBlobAsync($"{hash}:{relPath}", relPath, commit.ShortHash).ConfigureAwait(true);
+
+                await _openDiff(new DiffRequest(
+                    leftFile, rightFile,
+                    $"Diff: {fileName} @ {commit.ShortHash}",
+                    $"{fileName} ({commit.ShortHash}~1)",
+                    $"{fileName} ({commit.ShortHash})")).ConfigureAwait(true);
+
+                StatusMessage = $"Opened diff for {fileName} at {commit.ShortHash}";
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = "Could not open diff: " + ex.Message;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        /// <summary>
+        /// Writes the full staged diff (<c>git diff --cached</c>) to a temp file and opens it in
+        /// the editor — handy for pasting into an AI to draft a commit message.
+        /// </summary>
+        private async Task GenerateCommitDiffAsync()
+        {
+            if (_openDocument == null)
+                return;
+
+            IsBusy = true;
+            try
+            {
+                var result = await _git.GetCachedDiffAsync().ConfigureAwait(true);
+                if (!result.Success)
+                {
+                    StatusMessage = "Could not read the staged diff — see the Git output window.";
+                    return;
+                }
+
+                var diff = result.StandardOutput;
+                if (string.IsNullOrWhiteSpace(diff))
+                {
+                    StatusMessage = "Nothing staged — stage changes first, then generate the diff.";
+                    return;
+                }
+
+                var dir = Path.Combine(Path.GetTempPath(), "GitForTfs");
+                Directory.CreateDirectory(dir);
+                var file = Path.Combine(dir, "staged-diff.diff");
+                File.WriteAllText(file, diff, new UTF8Encoding(false));
+
+                await _openDocument(file).ConfigureAwait(true);
+                StatusMessage = "Opened the staged diff — paste it to your AI for a commit message.";
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = "Could not generate the staged diff: " + ex.Message;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        private string GetWorkingFilePath(string relativePath)
+        {
+            var normalized = relativePath.Replace('/', Path.DirectorySeparatorChar);
+            return Path.Combine(_git.WorkingDirectory ?? string.Empty, normalized);
+        }
+
+        private async Task<string> WriteTempBlobAsync(string revisionSpec, string relativePathForExtension, string tag)
+        {
+            var content = string.IsNullOrEmpty(revisionSpec)
+                ? string.Empty
+                : await _git.GetBlobContentAsync(revisionSpec).ConfigureAwait(true);
+
+            var ext = Path.GetExtension(relativePathForExtension);
+            var baseName = Path.GetFileNameWithoutExtension(relativePathForExtension);
+            var safeTag = tag.Replace(':', '_').Replace('~', '_').Replace('/', '_').Replace('\\', '_');
+            var fileName = $"{baseName}.{safeTag}{ext}";
+
+            var dir = Path.Combine(Path.GetTempPath(), "GitForTfs", "diff");
+            Directory.CreateDirectory(dir);
+            var fullPath = Path.Combine(dir, fileName);
+
+            File.WriteAllText(fullPath, content, new UTF8Encoding(false));
+            return fullPath;
+        }
+
+        // -----------------------------------------------------------------
+        // Per-file history
+        // -----------------------------------------------------------------
+
+        private Task ShowFileHistoryAsync(ChangeItemViewModel item) =>
+            item == null ? Task.CompletedTask : ShowFileHistoryForPathAsync(item.Path);
+
+        /// <summary>
+        /// Loads the commit history for a file and brings the "File History" tab forward.
+        /// <paramref name="path"/> may be absolute (e.g. from Solution Explorer) or already
+        /// relative to the repository root.
+        /// </summary>
+        public async Task ShowFileHistoryForPathAsync(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return;
+
+            if (!_git.HasWorkingDirectory)
+            {
+                StatusMessage = "Set a git repository first.";
+                return;
+            }
+
+            var relPath = ToRepositoryRelativePath(path);
+
+            IsBusy = true;
+            try
+            {
+                _historyFileRelativePath = relPath;
+                FileHistoryTitle = "History: " + relPath;
+
+                var commits = await _git.GetFileLogAsync(relPath).ConfigureAwait(true);
+                FileHistoryCommits.Clear();
+                foreach (var commit in commits)
+                    FileHistoryCommits.Add(new CommitItemViewModel(commit));
+
+                RaisePropertyChanged(nameof(HasFileHistory));
+                SelectedTabIndex = 3; // File History tab
+                StatusMessage = $"{FileHistoryCommits.Count} commit(s) touched {relPath}";
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        private string ToRepositoryRelativePath(string path)
+        {
+            var root = _git.WorkingDirectory;
+            if (string.IsNullOrEmpty(root) || !Path.IsPathRooted(path))
+                return path.Replace('\\', '/');
+
+            var fullPath = Path.GetFullPath(path);
+            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            if (fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+                return fullPath.Substring(fullRoot.Length).Replace('\\', '/');
+
+            return path.Replace('\\', '/');
+        }
 
         // -----------------------------------------------------------------
         // Shared runner

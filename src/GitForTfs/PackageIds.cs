@@ -3,8 +3,8 @@ using System;
 namespace GitForTfs
 {
     /// <summary>
-    /// GUIDs shared between the C# package and the <c>GitForTfsPackage.vsct</c> command table.
-    /// The string values MUST stay in sync with the &lt;Symbols&gt; section of the .vsct file.
+    /// GUIDs shared between the C# package and the <c>GitForTfsPackage.vsct</c> command table. The string values MUST
+    /// stay in sync with the &lt;Symbols&gt; section of the .vsct file.
     /// </summary>
     internal static class PackageGuids
     {
@@ -19,6 +19,8 @@ namespace GitForTfs
     internal static class PackageIds
     {
         public const int GitMenuGroup = 0x1020;
+        public const int SolutionExplorerGroup = 0x1030;
         public const int OpenToolWindowCommand = 0x0100;
+        public const int FileHistoryCommand = 0x0200;
     }
 }

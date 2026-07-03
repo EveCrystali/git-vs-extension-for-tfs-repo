@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- netstandard2.0 (NOT net472) so this MEF part loads in BOTH CodeLens
+         ServiceHub hosts VS ships: the classic .NET Framework host AND the newer
+         .NET (Core) "dotnet" host. VS 2026 routes CodeLens to the .NET Core host,
+         which silently ignores a net472 assembly — that is why the git blame lens
+         never appeared. A netstandard2.0 assembly is loadable by both runtimes. -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>GitForTfs.CodeLens</AssemblyName>
+    <RootNamespace>GitForTfs.CodeLens</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- Ship only our own dll; the CodeLens host provides every referenced VS/MEF
+         assembly at runtime, so none of the dependencies go into the VSIX. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile-time only (ExcludeAssets=runtime): the CodeLens host supplies these. -->
+    <PackageReference Include="System.ComponentModel.Composition" Version="4.5.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.VisualStudio.Language" Version="17.0.491">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.VisualStudio.Text.Data" Version="17.0.491">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.VisualStudio.CoreUtility" Version="17.0.491">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.VisualStudio.Threading" Version="17.0.64">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

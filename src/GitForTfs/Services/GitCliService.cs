@@ -353,5 +353,61 @@ namespace GitForTfs.Services
         /// <summary>Returns the unified diff for a single file (staged or working tree).</summary>
         public Task<GitResult> GetDiffAsync(string path, bool staged, CancellationToken cancellationToken = default) =>
             RunAsync($"diff {(staged ? "--staged " : string.Empty)}-- \"{path}\"", cancellationToken: cancellationToken);
+
+        /// <summary>Returns the full staged (cached) diff — everything that would go into a commit.</summary>
+        public Task<GitResult> GetCachedDiffAsync(CancellationToken cancellationToken = default) =>
+            RunAsync("diff --cached", cancellationToken: cancellationToken);
+
+        // ---------------------------------------------------------------------
+        // Blob content (for the side-by-side diff viewer)
+        // ---------------------------------------------------------------------
+
+        /// <summary>
+        /// Returns the text content of a blob identified by a git revision spec such as
+        /// <c>HEAD:path</c> (committed), <c>:path</c> (index/staged) or <c>&lt;hash&gt;:path</c>.
+        /// Returns an empty string when the object does not exist (e.g. a newly added file has
+        /// no HEAD version), so callers can always produce a valid "before"/"after" side.
+        /// </summary>
+        public async Task<string> GetBlobContentAsync(string revisionSpec, CancellationToken cancellationToken = default)
+        {
+            var result = await RunAsync($"show \"{revisionSpec}\"", cancellationToken: cancellationToken).ConfigureAwait(false);
+            return result.Success ? result.StandardOutput : string.Empty;
+        }
+
+        // ---------------------------------------------------------------------
+        // Per-file history
+        // ---------------------------------------------------------------------
+
+        /// <summary>
+        /// Returns the commit history that touched a single file, following renames.
+        /// </summary>
+        public async Task<IReadOnlyList<GitCommit>> GetFileLogAsync(string relativePath, int maxCount = 100, CancellationToken cancellationToken = default)
+        {
+            var commits = new List<GitCommit>();
+
+            const string format = "%H%x1f%h%x1f%an%x1f%ar%x1f%s";
+            var args = $"log --follow --max-count={maxCount} --pretty=format:\"{format}\" -- \"{relativePath}\"";
+            var result = await RunAsync(args, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (!result.Success)
+                return commits;
+
+            using (var reader = new StringReader(result.StandardOutput))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (line.Length == 0)
+                        continue;
+
+                    var parts = line.Split('\u001f');
+                    if (parts.Length < 5)
+                        continue;
+
+                    commits.Add(new GitCommit(parts[0], parts[1], parts[2], parts[3], parts[4]));
+                }
+            }
+
+            return commits;
+        }
     }
 }
