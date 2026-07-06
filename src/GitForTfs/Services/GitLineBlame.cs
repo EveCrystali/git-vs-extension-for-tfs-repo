@@ -39,11 +39,12 @@ namespace GitForTfs.Services
             }
         }
 
-        /// <summary>The one-line label shown at the end of the current editor line (initials).</summary>
+        /// <summary>The one-line label shown at the end of the current editor line.
+        /// No author here — the full author/hash live in the adornment's tooltip.</summary>
         public string InlineText =>
             string.IsNullOrEmpty(Summary)
-                ? $"{AuthorInitials}, {RelativeDate}"
-                : $"{AuthorInitials}, {RelativeDate} • {Summary}";
+                ? RelativeDate
+                : $"{RelativeDate} • {Summary}";
     }
 
     /// <summary>
